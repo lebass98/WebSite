@@ -93,7 +93,7 @@ final class Updater: ObservableObject {
     }
 }
 
-/// 툴바: 새 버전이 있을 때만 보이는 버튼
+/// 툴바: 지금 버전을 늘 보여 주고, 누르면 업데이트 확인. 새 버전이 있으면 눈에 띄는 "업데이트" 버튼으로 바뀜
 struct UpdateButton: View {
     @ObservedObject private var updater = Updater.shared
 
@@ -107,7 +107,16 @@ struct UpdateButton: View {
             }
             .tint(.accentColor)
             .buttonStyle(.borderedProminent)
-            .help("새 버전 \(info.version)이 나왔어요")
+            .help("새 버전 \(info.version)이 나왔어요 (지금 \(Updater.currentVersion))")
+        } else {
+            Button {
+                Task { await updater.check(manual: true) }
+            } label: {
+                Label("v\(Updater.currentVersion)", systemImage: updater.state == .checking ? "arrow.triangle.2.circlepath" : "checkmark.seal")
+                    .labelStyle(.titleAndIcon)
+            }
+            .disabled(updater.state == .checking || updater.state == .downloading)
+            .help("지금 버전 \(Updater.currentVersion) · 누르면 업데이트 확인")
         }
     }
 }
