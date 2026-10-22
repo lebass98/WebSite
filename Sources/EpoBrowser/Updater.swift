@@ -11,7 +11,7 @@ struct ReleaseInfo: Codable, Equatable {
 }
 
 /// 업데이트 확인·설치
-/// 배포 폴더: 구글 드라이브 데스크톱 앱 폴더의 "EpoBrowser 배포판" (release.sh 가 설치 파일과 latest.json 을 올림)
+/// 배포 위치: 깃허브 저장소 lebass98/WebSite 의 dist/ (release.sh 가 설치 파일과 latest.json 을 올림)
 /// 앱을 켤 때와 6시간마다 확인하고, 새 버전이 있으면 툴바에 알림 → 누르면 설치 프로그램을 띄움
 @MainActor
 final class Updater: ObservableObject {
@@ -27,7 +27,8 @@ final class Updater: ObservableObject {
 
     static let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     static let currentBuild = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    private static let folderName = "EpoBrowser 배포판"
+    /// 공개 저장소의 dist 폴더 (로그인 없이 받을 수 있음)
+    private static let releaseBase = URL(string: "https://raw.githubusercontent.com/lebass98/WebSite/main/dist/")!
 
     var available: ReleaseInfo? { if case .available(let info) = state { info } else { nil } }
 
@@ -46,30 +47,13 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// 배포 폴더 찾기 (구글 드라이브 데스크톱 앱: ~/Library/CloudStorage/GoogleDrive-<계정>/내 드라이브)
-    static var releaseFolder: URL? {
-        let fm = FileManager.default
-        let cloud = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/CloudStorage")
-        guard let accounts = try? fm.contentsOfDirectory(at: cloud, includingPropertiesForKeys: nil) else { return nil }
-        for account in accounts where account.lastPathComponent.hasPrefix("GoogleDrive-") {
-            for drive in ["내 드라이브", "My Drive"] {
-                let folder = account.appendingPathComponent(drive).appendingPathComponent(folderName)
-                if fm.fileExists(atPath: folder.path) { return folder }
-            }
-        }
-        return nil
-    }
-
     func check(manual: Bool) async {
         if case .downloading = state { return }
         state = .checking
-        guard let folder = Self.releaseFolder else {
-            state = .failed("구글 드라이브의 \"\(Self.folderName)\" 폴더를 찾지 못했어요.")
-            return
-        }
-        let manifest = folder.appendingPathComponent("latest.json")
-        // 드라이브 파일은 처음 읽을 때 내려받느라 느릴 수 있어서 화면을 막지 않게 따로 읽음
-        let data = await Task.detached { try? Data(contentsOf: manifest) }.value
+        var request = URLRequest(url: Self.releaseBase.appendingPathComponent("latest.json"))
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 20
+        let data = try? await URLSession.shared.data(for: request).0
         lastChecked = Date()
         guard let data, let info = try? JSONDecoder().decode(ReleaseInfo.self, from: data) else {
             state = .failed("새 버전 정보(latest.json)를 읽지 못했어요.")
@@ -87,18 +71,18 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// 설치 파일을 임시 폴더로 복사한 뒤 macOS 설치 프로그램으로 엶 (비밀번호는 설치 프로그램에서 입력)
+    /// 설치 파일을 내려받아 macOS 설치 프로그램으로 엶 (비밀번호는 설치 프로그램에서 입력)
     func install(_ info: ReleaseInfo) async {
-        guard let folder = Self.releaseFolder else { return }
         state = .downloading
-        let source = folder.appendingPathComponent(info.file)
         let target = FileManager.default.temporaryDirectory.appendingPathComponent(info.file)
-        let copied: Bool = await Task.detached {
+        do {
+            let (downloaded, response) = try await URLSession.shared.download(from: Self.releaseBase.appendingPathComponent(info.file))
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             try? FileManager.default.removeItem(at: target)
-            do { try FileManager.default.copyItem(at: source, to: target); return true } catch { return false }
-        }.value
-        guard copied else {
-            state = .failed("설치 파일(\(info.file))을 가져오지 못했어요.")
+            try FileManager.default.moveItem(at: downloaded, to: target)
+        } catch {
+            DebugLog.write("업데이트 받기 실패: \(error)")
+            state = .failed("설치 파일(\(info.file))을 받지 못했어요.")
             return
         }
         DebugLog.write("업데이트 설치 시작: \(info.version)")
