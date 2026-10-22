@@ -1,0 +1,202 @@
+import AppKit
+import SwiftUI
+
+/// 새 버전 정보 (배포 폴더의 latest.json)
+struct ReleaseInfo: Codable, Equatable {
+    let version: String     // 보이는 버전 (예: 2.2)
+    let build: Int          // 비교용 번호 (Info.plist CFBundleVersion)
+    let file: String        // 설치 파일 이름 (예: EpoBrowser-2.2.pkg)
+    let notes: [String]     // 바뀐 점
+    let date: String
+}
+
+/// 업데이트 확인·설치
+/// 배포 폴더: 구글 드라이브 데스크톱 앱 폴더의 "EpoBrowser 배포판" (release.sh 가 설치 파일과 latest.json 을 올림)
+/// 앱을 켤 때와 6시간마다 확인하고, 새 버전이 있으면 툴바에 알림 → 누르면 설치 프로그램을 띄움
+@MainActor
+final class Updater: ObservableObject {
+    static let shared = Updater()
+
+    enum State: Equatable {
+        case idle, checking, upToDate, available(ReleaseInfo), downloading, failed(String)
+    }
+
+    @Published private(set) var state = State.idle
+    @Published private(set) var lastChecked: Date?
+    @Published var showSheet = false
+
+    static let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+    static let currentBuild = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
+    private static let folderName = "EpoBrowser 배포판"
+
+    var available: ReleaseInfo? { if case .available(let info) = state { info } else { nil } }
+
+    private var timer: Task<Void, Never>?
+    private var announced: Int?
+
+    /// 앱을 켤 때 한 번 (조금 기다렸다 확인, 그 뒤 6시간마다)
+    func startAutoCheck() {
+        guard timer == nil else { return }
+        timer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            while !Task.isCancelled {
+                await self?.check(manual: false)
+                try? await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000)
+            }
+        }
+    }
+
+    /// 배포 폴더 찾기 (구글 드라이브 데스크톱 앱: ~/Library/CloudStorage/GoogleDrive-<계정>/내 드라이브)
+    static var releaseFolder: URL? {
+        let fm = FileManager.default
+        let cloud = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/CloudStorage")
+        guard let accounts = try? fm.contentsOfDirectory(at: cloud, includingPropertiesForKeys: nil) else { return nil }
+        for account in accounts where account.lastPathComponent.hasPrefix("GoogleDrive-") {
+            for drive in ["내 드라이브", "My Drive"] {
+                let folder = account.appendingPathComponent(drive).appendingPathComponent(folderName)
+                if fm.fileExists(atPath: folder.path) { return folder }
+            }
+        }
+        return nil
+    }
+
+    func check(manual: Bool) async {
+        if case .downloading = state { return }
+        state = .checking
+        guard let folder = Self.releaseFolder else {
+            state = .failed("구글 드라이브의 \"\(Self.folderName)\" 폴더를 찾지 못했어요.")
+            return
+        }
+        let manifest = folder.appendingPathComponent("latest.json")
+        // 드라이브 파일은 처음 읽을 때 내려받느라 느릴 수 있어서 화면을 막지 않게 따로 읽음
+        let data = await Task.detached { try? Data(contentsOf: manifest) }.value
+        lastChecked = Date()
+        guard let data, let info = try? JSONDecoder().decode(ReleaseInfo.self, from: data) else {
+            state = .failed("새 버전 정보(latest.json)를 읽지 못했어요.")
+            return
+        }
+        if info.build > Self.currentBuild {
+            DebugLog.write("업데이트 있음: \(Self.currentVersion) → \(info.version)")
+            // 직접 확인했거나, 이 버전을 이번 실행에서 처음 알게 됐으면 안내 창을 띄움
+            if manual || announced != info.build { showSheet = true }
+            announced = info.build
+            state = .available(info)
+        } else {
+            state = .upToDate
+            if manual { DebugLog.write("업데이트 확인: 최신 버전 \(Self.currentVersion)") }
+        }
+    }
+
+    /// 설치 파일을 임시 폴더로 복사한 뒤 macOS 설치 프로그램으로 엶 (비밀번호는 설치 프로그램에서 입력)
+    func install(_ info: ReleaseInfo) async {
+        guard let folder = Self.releaseFolder else { return }
+        state = .downloading
+        let source = folder.appendingPathComponent(info.file)
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent(info.file)
+        let copied: Bool = await Task.detached {
+            try? FileManager.default.removeItem(at: target)
+            do { try FileManager.default.copyItem(at: source, to: target); return true } catch { return false }
+        }.value
+        guard copied else {
+            state = .failed("설치 파일(\(info.file))을 가져오지 못했어요.")
+            return
+        }
+        DebugLog.write("업데이트 설치 시작: \(info.version)")
+        state = .available(info)
+        showSheet = false
+        // 설치가 끝나면 설치 파일의 마무리 스크립트가 앱을 다시 켬
+        NSWorkspace.shared.open(target)
+    }
+}
+
+/// 툴바: 새 버전이 있을 때만 보이는 버튼
+struct UpdateButton: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        if let info = updater.available {
+            Button {
+                updater.showSheet = true
+            } label: {
+                Label("업데이트 \(info.version)", systemImage: "arrow.down.app.fill")
+                    .labelStyle(.titleAndIcon)
+            }
+            .tint(.accentColor)
+            .buttonStyle(.borderedProminent)
+            .help("새 버전 \(info.version)이 나왔어요")
+        }
+    }
+}
+
+/// 새 버전 안내 창
+struct UpdateSheet: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch updater.state {
+            case .available(let info):
+                Label("새 버전 \(info.version)이 나왔어요", systemImage: "arrow.down.app.fill")
+                    .font(.title3.bold())
+                Text("지금 버전 \(Updater.currentVersion) · 배포일 \(info.date)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !info.notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(info.notes, id: \.self) { note in
+                            Label(note, systemImage: "checkmark.circle").font(.callout)
+                        }
+                    }
+                }
+                Text("설치를 누르면 macOS 설치 프로그램이 열려요. 안내대로 진행하고 비밀번호를 넣으면 앱이 새 버전으로 다시 켜져요.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("나중에") { updater.showSheet = false }
+                    Button("설치") { Task { await updater.install(info) } }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+            case .downloading:
+                HStack { ProgressView().controlSize(.small); Text("설치 파일 가져오는 중…") }
+            case .checking:
+                HStack { ProgressView().controlSize(.small); Text("새 버전 확인 중…") }
+            case .upToDate:
+                Label("지금 최신 버전(\(Updater.currentVersion))이에요", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                HStack { Spacer(); Button("확인") { updater.showSheet = false }.keyboardShortcut(.defaultAction) }
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                HStack { Spacer(); Button("닫기") { updater.showSheet = false }.keyboardShortcut(.defaultAction) }
+            case .idle:
+                EmptyView()
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+/// 설정 창의 업데이트 칸
+struct UpdateSettingsSection: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        Section("업데이트") {
+            LabeledContent("지금 버전", value: "\(Updater.currentVersion) (\(Updater.currentBuild))")
+            LabeledContent("상태", value: statusText)
+            Button("지금 확인") { Task { await updater.check(manual: true) } }
+                .disabled(updater.state == .checking || updater.state == .downloading)
+        }
+    }
+
+    private var statusText: String {
+        switch updater.state {
+        case .idle: "아직 확인 안 함"
+        case .checking: "확인 중…"
+        case .upToDate: "최신 버전"
+        case .available(let info): "새 버전 \(info.version) 있음"
+        case .downloading: "설치 파일 가져오는 중…"
+        case .failed(let message): message
+        }
+    }
+}

@@ -1,0 +1,18 @@
+# 빌드 결과물 (dist/의 배포 파일은 저장소에도 올리고 구글 드라이브에도 올림)
+.build/
+
+# macOS / 외장하드(exFAT) 숨김 파일
+.DS_Store
+._*
+
+# 편집기
+.swiftpm/
+*.xcodeproj/
+
+# 안드로이드 빌드 결과물
+android/.gradle/
+android/**/build/
+android/local.properties
+
+# 리드미는 저장소에 올리지 않음
+README.md
