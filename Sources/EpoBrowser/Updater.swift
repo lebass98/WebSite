@@ -29,6 +29,8 @@ final class Updater: ObservableObject {
     static let currentBuild = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     /// 공개 저장소의 dist 폴더 (로그인 없이 받을 수 있음)
     private static let releaseBase = URL(string: "https://raw.githubusercontent.com/lebass98/WebSite/main/dist/")!
+    /// 버전 정보는 깃허브 API로 읽음 (원본 주소는 5분 동안 캐시돼서 막 올린 버전이 안 보임)
+    private static let manifestURL = URL(string: "https://api.github.com/repos/lebass98/WebSite/contents/dist/latest.json")!
 
     var available: ReleaseInfo? { if case .available(let info) = state { info } else { nil } }
 
@@ -50,7 +52,8 @@ final class Updater: ObservableObject {
     func check(manual: Bool) async {
         if case .downloading = state { return }
         state = .checking
-        var request = URLRequest(url: Self.releaseBase.appendingPathComponent("latest.json"))
+        var request = URLRequest(url: Self.manifestURL)
+        request.setValue("application/vnd.github.raw", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 20
         let data = try? await URLSession.shared.data(for: request).0
