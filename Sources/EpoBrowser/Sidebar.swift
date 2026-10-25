@@ -3,6 +3,7 @@ import Combine
 
 final class CategoryExpand: ObservableObject {
     @Published var open = false
+    @Published var filtersOpen = false
 }
 
 /// 항상 보이는 왼쪽 사이드바 (검색 종류·메뉴·화질·길이·카테고리·최근 본 영상)
@@ -17,7 +18,16 @@ struct SidebarView: View {
         // 사이드바 칸에서는 ScrollView 안 버튼이 실제 마우스 클릭을 못 받아서 기본 사이드바 목록(List)으로 만듦
         List {
             Group {
-                group("검색") {
+                HStack(spacing: 10) {
+                    Image(systemName: "play.rectangle.fill")
+                        .font(.title2).foregroundStyle(EpoStyle.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("EpoBrowser").font(.headline)
+                        Text("나만의 미디어 라이브러리").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.bottom, 4)
+                group("탐색 · 검색 유형") {
                     ForEach(SearchType.allCases) { type in
                         row(type.label, selected: nav.searchType == type && isSearchSection) {
                             nav.searchType = type
@@ -29,7 +39,7 @@ struct SidebarView: View {
                     }
                 }
 
-                group("메뉴") {
+                group("둘러보기") {
                     row("베스트 영상", icon: "flame", selected: nav.section == .best) { nav.section = .best }
                     row("최고 평점", icon: "star", selected: nav.section == .topRated) { nav.section = .topRated }
                     row("카테고리", icon: "square.grid.2x2", selected: nav.section == .categories) { nav.section = .categories }
@@ -56,101 +66,109 @@ struct SidebarView: View {
                     }
                 }
 
-                group("화질") {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        ForEach(QualityOption.allCases) { q in
-                            chip(q.label, selected: filters.applied.quality == q) { filters.setQuality(q) }
+                DisclosureGroup(isExpanded: $expand.filtersOpen) {
+                    group("화질 · 즉시 적용") {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                            ForEach(QualityOption.allCases) { q in
+                                chip(q.label, selected: filters.applied.quality == q) { filters.setQuality(q) }
+                            }
                         }
+                        Text("VR은 VR에서만 나오고, 다른 화질에서는 빠져요.").font(.caption2).foregroundStyle(.secondary)
                     }
-                    Text("VR은 VR에서만 나오고, 다른 화질에서는 빠져요.").font(.caption2).foregroundStyle(.secondary)
-                }
 
-                group("길이 (분)") {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("최소").font(.caption).foregroundStyle(.secondary)
-                            Text(minuteText(filters.draft.minMinutes)).bold()
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing) {
-                            Text("최대").font(.caption).foregroundStyle(.secondary)
-                            Text(minuteText(filters.draft.maxMinutes)).bold()
-                        }
-                    }
-                    RangeSlider(low: $filters.draft.minMinutes, high: $filters.draft.maxMinutes,
-                                range: 0...VideoFilters.openMax)
-                        .frame(height: 22)
-                    HStack {
-                        ForEach(["0", "15m", "30m", "45m", "1h+"], id: \.self) { t in
-                            Text(t).font(.caption2).foregroundStyle(.secondary)
-                            if t != "1h+" { Spacer() }
-                        }
-                    }
-                }
-
-                group("카테고리") {
-                    Button {
-                        expand.open.toggle()
-                    } label: {
+                    group("길이 (분)") {
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("카테고리 고르기").bold()
-                                Text("\(filters.draft.categories.count)개 선택 (최대 \(VideoFilters.maxCategories)개)")
-                                    .font(.caption).foregroundStyle(.secondary)
+                            VStack(alignment: .leading) {
+                                Text("최소").font(.caption).foregroundStyle(.secondary)
+                                Text(minuteText(filters.draft.minMinutes)).bold()
                             }
                             Spacer()
-                            Image(systemName: expand.open ? "chevron.up" : "chevron.down")
-                        }
-                        .padding(10)
-                        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    if expand.open {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(SiteCategory.sorted) { cat in
-                                let on = filters.draft.categories.contains(cat.slug)
-                                Button {
-                                    filters.toggleCategory(cat.slug)
-                                } label: {
-                                    HStack {
-                                        Image(systemName: on ? "checkmark.square.fill" : "square")
-                                            .foregroundStyle(on ? Color.accentColor : .secondary)
-                                        Text(cat.name)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 3)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(!on && filters.draft.categories.count >= VideoFilters.maxCategories)
+                            VStack(alignment: .trailing) {
+                                Text("최대").font(.caption).foregroundStyle(.secondary)
+                                Text(minuteText(filters.draft.maxMinutes)).bold()
                             }
                         }
-                        .frame(maxHeight: 260)
+                        RangeSlider(low: $filters.draft.minMinutes, high: $filters.draft.maxMinutes,
+                                    range: 0...VideoFilters.openMax)
+                            .frame(height: 22)
+                        HStack {
+                            ForEach(["0", "15m", "30m", "45m", "1h+"], id: \.self) { t in
+                                Text(t).font(.caption2).foregroundStyle(.secondary)
+                                if t != "1h+" { Spacer() }
+                            }
+                        }
                     }
-                }
 
-                HStack(spacing: 10) {
-                    Button {
-                        filters.apply()
-                        expand.open = false
-                    } label: {
-                        Text("적용").bold().frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .controlSize(.large)
-                    .disabled(!filters.hasChanges)
+                    group("카테고리") {
+                        Button {
+                            expand.open.toggle()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("카테고리 고르기").bold()
+                                    Text("\(filters.draft.categories.count)개 선택 (최대 \(VideoFilters.maxCategories)개)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: expand.open ? "chevron.up" : "chevron.down")
+                            }
+                            .padding(10)
+                            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
 
-                    Button {
-                        filters.clear()
-                    } label: {
-                        Text("초기화").bold().frame(maxWidth: .infinity)
+                        if expand.open {
+                            ScrollView {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(SiteCategory.sorted) { cat in
+                                    let on = filters.draft.categories.contains(cat.slug)
+                                    Button {
+                                        filters.toggleCategory(cat.slug)
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: on ? "checkmark.square.fill" : "square")
+                                                .foregroundStyle(on ? Color.accentColor : .secondary)
+                                            Text(cat.name)
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 3)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(!on && filters.draft.categories.count >= VideoFilters.maxCategories)
+                                }
+                            }
+                            }
+                            .frame(height: 220)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(filters.draft.isDefault && filters.applied.isDefault)
+
+                    HStack(spacing: 10) {
+                        Button {
+                            filters.apply()
+                            expand.open = false
+                        } label: {
+                            Text("필터 적용").bold().frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(EpoStyle.accent)
+                        .controlSize(.large)
+                        .disabled(!filters.hasChanges)
+
+                        Button {
+                            filters.clear()
+                        } label: {
+                            Text("초기화").bold().frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(filters.draft.isDefault && filters.applied.isDefault)
+                    }
+
+                } label: {
+                    Label(filters.applied.isDefault ? "세부 필터" : "세부 필터 · 적용 중", systemImage: "slider.horizontal.3")
+                        .font(.callout.weight(.semibold))
                 }
 
                 RecentListView()
@@ -176,7 +194,7 @@ struct SidebarView: View {
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline).foregroundStyle(.orange)
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             content()
         }
     }
@@ -189,8 +207,8 @@ struct SidebarView: View {
                 Spacer()
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .foregroundStyle(selected ? Color.red : Color.primary)
-            .background(selected ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(selected ? EpoStyle.accent : Color.primary)
+            .background(selected ? EpoStyle.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -200,9 +218,9 @@ struct SidebarView: View {
         Button(action: action) {
             Text(title)
                 .frame(maxWidth: .infinity, minHeight: 30)
-                .foregroundStyle(selected ? Color.orange : Color.primary)
+                .foregroundStyle(selected ? EpoStyle.accent : Color.primary)
                 .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(selected ? Color.orange : .clear, lineWidth: 1.5))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(selected ? EpoStyle.accent : .clear, lineWidth: 1.5))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -214,25 +232,45 @@ struct RangeSlider: View {
     @Binding var low: Int
     @Binding var high: Int
     let range: ClosedRange<Int>
+    var accessibilityTitle = "길이"
+    var accessibilityUnit = "분"
 
     var body: some View {
         GeometryReader { geo in
-            let width = geo.size.width - 18
-            let span = CGFloat(range.upperBound - range.lowerBound)
+            let width = max(1, geo.size.width - 18)
+            let span = CGFloat(max(1, range.upperBound - range.lowerBound))
             let x = { (v: Int) in CGFloat(v - range.lowerBound) / span * width + 9 }
             let value = { (px: CGFloat) in
                 Int(((px - 9) / width * span).rounded()) + range.lowerBound
             }
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary).frame(height: 4)
-                Capsule().fill(Color.orange)
+                Capsule().fill(EpoStyle.accent)
                     .frame(width: max(0, x(high) - x(low)), height: 4)
                     .offset(x: x(low))
                 knob.position(x: x(low), y: geo.size.height / 2)
+                    .accessibilityLabel("최소 \(accessibilityTitle)")
+                    .accessibilityValue("\(low) \(accessibilityUnit)")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment: low = min(low + 1, high)
+                        case .decrement: low = max(low - 1, range.lowerBound)
+                        @unknown default: break
+                        }
+                    }
                     .gesture(DragGesture().onChanged { g in
                         low = min(max(value(g.location.x), range.lowerBound), high)
                     })
                 knob.position(x: x(high), y: geo.size.height / 2)
+                    .accessibilityLabel("최대 \(accessibilityTitle)")
+                    .accessibilityValue("\(high) \(accessibilityUnit)")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment: high = min(high + 1, range.upperBound)
+                        case .decrement: high = max(high - 1, low)
+                        @unknown default: break
+                        }
+                    }
                     .gesture(DragGesture().onChanged { g in
                         high = max(min(value(g.location.x), range.upperBound), low)
                     })
@@ -242,7 +280,7 @@ struct RangeSlider: View {
 
     private var knob: some View {
         Circle().fill(.white)
-            .overlay(Circle().strokeBorder(Color.orange, lineWidth: 3))
+            .overlay(Circle().strokeBorder(EpoStyle.accent, lineWidth: 3))
             .frame(width: 18, height: 18)
             .shadow(radius: 1)
     }

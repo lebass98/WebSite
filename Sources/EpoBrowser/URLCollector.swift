@@ -151,10 +151,11 @@ struct URLCollectorPanel: View {
     @StateObject private var confirm = ConfirmClear()
     @StateObject private var copied = PopoverState()
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 5)
+    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 14, alignment: .top)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            LibraryHeader(title: "4K 주소 모음", subtitle: "모아 둔 영상을 다시 열거나 주소를 복사하세요", icon: "list.clipboard")
             HStack {
                 Text("4K 다운로드 주소").font(.headline)
                 Text("\(collector.items.count)개").foregroundStyle(.secondary)
@@ -177,8 +178,8 @@ struct URLCollectorPanel: View {
             }
 
             if collector.items.isEmpty {
-                Text("영상을 오른쪽 클릭 → \"4K 주소 모으기\"를 누르면 여기에 쌓여요.")
-                    .foregroundStyle(.secondary)
+                LibraryEmptyState(icon: "list.clipboard", title: "모아 둔 주소가 없어요",
+                                  message: "영상의 오른쪽 클릭 메뉴에서 ‘4K 주소 모으기’를 선택하세요.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -194,8 +195,8 @@ struct URLCollectorPanel: View {
             Text("전체 복사는 주소만 한 줄에 하나씩 복사해요. 파일 주소는 시간이 지나면 만료될 수 있어요.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
-        .padding(14)
-        .frame(width: 820, height: 560)
+        .padding(20)
+        .frame(width: 760, height: 560)
         .task { await collector.fillMissingInfo() }
         .confirmationDialog("모은 영상 \(collector.items.count)개를 모두 지울까요?", isPresented: $confirm.shown) {
             Button("모두 지우기", role: .destructive) { collector.clear() }
@@ -238,8 +239,12 @@ private struct CollectedTile: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             Text(item.title).font(.caption).lineLimit(2, reservesSpace: true)
         }
+        .padding(10)
+        .background(EpoStyle.surface, in: RoundedRectangle(cornerRadius: EpoStyle.radius))
+        .overlay(RoundedRectangle(cornerRadius: EpoStyle.radius).strokeBorder(Color.primary.opacity(0.06)))
         .contentShape(Rectangle())
         .onTapGesture { play() }
+        .accessibilityAction(named: Text("재생")) { play() }
         .help(canPlay ? "누르면 다시 재생 · \(item.url)" : item.url)
         .contextMenu {
             if canPlay { Button("재생") { play() } }

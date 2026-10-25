@@ -9,14 +9,35 @@ struct VideoListView: View {
     var onOpen: (Route) -> Void = { _ in }
     @StateObject private var sheet = SheetState()
     @ObservedObject private var thumbSize = ThumbnailSize.shared
+    @ObservedObject private var filters = FilterStore.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.title2.weight(.bold)).lineLimit(1)
+                    Text(model.isLoading ? "라이브러리를 불러오는 중…" : "\(model.visibleVideos.count)개 표시 · 영상을 선택해 재생하세요")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
             FilterBar(model: model, onOpen: onOpen)
+            if !filters.applied.isDefault {
+                HStack(spacing: 8) {
+                    Label("세부 필터 적용 중", systemImage: "line.3.horizontal.decrease.circle.fill")
+                        .font(.caption.weight(.medium)).foregroundStyle(EpoStyle.accent)
+                    Text(filters.applied.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer()
+                    Button("초기화") { filters.clear() }.font(.caption)
+                }
+                .padding(.horizontal, 24).padding(.bottom, 12)
+            }
             Divider()
             content
         }
+        .background(EpoStyle.canvas)
         .task { if model.videos.isEmpty && !model.isLoading { model.reload() } }
         .sheet(item: $sheet.video) { DownloadSheet(video: $0) }
         .navigationTitle(title)
@@ -32,8 +53,7 @@ struct VideoListView: View {
     @ViewBuilder private var content: some View {
         if let error = model.errorMessage, model.videos.isEmpty {
             VStack(spacing: 12) {
-                Image(systemName: "wifi.exclamationmark").font(.system(size: 40)).foregroundStyle(.secondary)
-                Text(error).multilineTextAlignment(.center)
+                LibraryEmptyState(icon: "wifi.exclamationmark", title: "연결을 확인해 주세요", message: error)
                 Button("다시 시도") { model.reload() }.buttonStyle(.borderedProminent)
             }
             .padding(40)
@@ -42,7 +62,10 @@ struct VideoListView: View {
             ProgressView("불러오는 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.visibleVideos.isEmpty {
             VStack(spacing: 12) {
-                Text("조건에 맞는 영상이 없어요").foregroundStyle(.secondary)
+                LibraryEmptyState(icon: "line.3.horizontal.decrease.circle", title: "조건에 맞는 영상이 없어요",
+                                  message: "세부 필터를 초기화하거나 다른 검색어로 다시 찾아보세요.")
+                Button("세부 필터 초기화") { FilterStore.shared.clear() }
+                    .buttonStyle(.bordered)
                 if model.canLoadMore { Button("더 찾아보기") { model.loadNextPage() } }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,6 +78,7 @@ struct VideoListView: View {
                                       onOpen(Route(title: "\(name) 업로드 영상", path: path + "uploaded-videos/"))
                                   })
                             .onTapGesture { play(video) }
+                            .accessibilityAction(named: Text("재생")) { play(video) }
                             .contextMenu { menu(for: video) }
                             .onAppear {
                                 // 끝에 가까워지면 다음 페이지 자동으로 불러오기
@@ -62,7 +86,7 @@ struct VideoListView: View {
                             }
                     }
                 }
-                .padding(16)
+                .padding(24)
 
                 footer
             }
@@ -148,9 +172,10 @@ struct LoginPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("사이트 로그인").font(.headline)
+            LibraryHeader(title: loggedIn ? "내 계정" : "사이트 로그인",
+                          subtitle: "로그인 상태와 저장된 계정을 관리하세요", icon: "person.crop.circle")
 
-            TextField("아이디", text: $form.username)
+            TextField("아이디 또는 이메일", text: $form.username)
                 .textFieldStyle(.roundedBorder)
                 .disabled(loggedIn || busy)
             SecureField("비밀번호", text: $form.password)
@@ -184,7 +209,7 @@ struct LoginPanel: View {
                 .font(.caption)
         }
         .padding(16)
-        .frame(width: 300)
+        .frame(width: 360)
         .onAppear {
             if let cred = Keychain.load() {
                 form.username = cred.username
@@ -208,6 +233,7 @@ struct FilterBar: View {
     @StateObject private var popover = PopoverState()
 
     var body: some View {
+        ScrollView(.horizontal) {
         HStack(spacing: 14) {
             if model.isSortable {
                 Picker("정렬", selection: $model.order) {
@@ -233,7 +259,7 @@ struct FilterBar: View {
             Button {
                 popover.shown = true
             } label: {
-                Label("All Categories", systemImage: "list.bullet.rectangle")
+                Label("전체 카테고리", systemImage: "list.bullet.rectangle")
             }
             .popover(isPresented: $popover.shown, arrowEdge: .bottom) {
                 AllCategoriesView { tag in
@@ -250,6 +276,8 @@ struct FilterBar: View {
         .pickerStyle(.menu)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        }
+        .scrollIndicators(.automatic)
     }
 }
 
@@ -326,6 +354,12 @@ struct VideoCard: View {
             HStack(spacing: 10) {
                 Label(video.views.formatted(.number.notation(.compactName)), systemImage: "eye")
                 Label(String(format: "%.1f", video.rate), systemImage: "star.fill")
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
                 if let name = video.uploaderName, let path = video.uploaderPath {
                     Button {
                         onUploader(name, path)
@@ -341,7 +375,16 @@ struct VideoCard: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+        .padding(10)
+        .background(EpoStyle.surface, in: RoundedRectangle(cornerRadius: EpoStyle.radius))
+        .overlay(RoundedRectangle(cornerRadius: EpoStyle.radius)
+            .strokeBorder(hovering ? EpoStyle.accent.opacity(0.5) : Color.primary.opacity(0.06)))
         .contentShape(Rectangle())
+        .onDisappear {
+            hover.delayTask?.cancel()
+            hover.inside = false
+            hover.showVideo = false
+        }
         .onHover { inside in
             hover.inside = inside
             hover.frame = 0

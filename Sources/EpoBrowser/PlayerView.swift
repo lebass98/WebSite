@@ -65,8 +65,9 @@ struct PlayerHost: View {
                 PlayerView(item: item)
                     .id(item.id)
             } else {
-                Text("목록에서 영상을 고르면 여기서 재생돼요.")
-                    .foregroundStyle(.secondary)
+                LibraryEmptyState(icon: "play.rectangle", title: "재생할 영상을 선택하세요",
+                                  message: "라이브러리의 영상을 선택하면 이 창에서 재생됩니다.")
+                    .preferredColorScheme(.dark)
                     .frame(minWidth: 240, minHeight: 135)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.black)
@@ -323,12 +324,12 @@ final class PlayerChrome: NSObject, ObservableObject {
         let up = bar.isFlipped ? -bar.bounds.height : bar.bounds.height
         let hidden = CATransform3DMakeTranslation(0, up, 0)
         let target = show ? CATransform3DIdentity : hidden
-        if animated {
+        if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let slide = CABasicAnimation(keyPath: "transform")
             slide.fromValue = layer.presentation()?.transform ?? layer.transform
             slide.toValue = target
             slide.duration = 0.22
-            slide.timingFunction = CAMediaTimingFunction(name: show ? .easeOut : .easeIn)
+            slide.timingFunction = CAMediaTimingFunction(name: .easeOut)
             layer.add(slide, forKey: "epoSlide")
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.22
@@ -365,7 +366,7 @@ struct PlayerView: View {
             .navigationSubtitle(loader.subtitle)
             .sheet(item: $sheet.video) { DownloadSheet(video: $0) }
             .overlay(alignment: .bottom) { ToastView() }
-            .task {
+            .task { [loader] in
                 subtitles.listenAssetProvider = { [weak loader] in await loader?.listenAsset() }
                 loader.start(item)
             }
@@ -508,6 +509,17 @@ struct PlayerView: View {
                     .help("즐겨찾기·나중에 볼 영상·플레이리스트에 저장")
                 }
                 ToolbarItem {
+                    Menu {
+                        Button("최고 화질로 다시 연결") { subtitles.stop(); loader.stop(); loader.start(item) }
+                        Button("사이트 플레이어로 전환") { subtitles.stop(); loader.showSitePlayer() }
+                        Divider()
+                        Text("더블클릭: 전체 화면")
+                        Text("1·2·3·4: 재생 창 크기")
+                    } label: {
+                        Label("재생 옵션", systemImage: "ellipsis.circle")
+                    }
+                }
+                ToolbarItem {
                     Button {
                         NSWorkspace.shared.open(URL(string: item.url)!)
                     } label: {
@@ -551,11 +563,17 @@ struct PlayerView: View {
             .foregroundStyle(.white)
             .padding(10)
         case .failed(let message):
-            Text("자막 만들기 실패: \(message)").font(.caption)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(.red.opacity(0.7), in: Capsule())
-                .foregroundStyle(.white)
-                .padding(10)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("자막을 만들지 못했어요", systemImage: "exclamationmark.triangle")
+                    .font(.callout.weight(.semibold))
+                Text(message).font(.caption).lineLimit(3)
+                Button("다시 만들기") { buildSubtitles() }.buttonStyle(.bordered)
+            }
+            .padding(14)
+            .frame(maxWidth: 360, alignment: .leading)
+            .foregroundStyle(.white)
+            .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 12))
+            .padding(12)
         default:
             EmptyView()
         }
@@ -566,7 +584,11 @@ struct PlayerView: View {
         case .finding:
             VStack(spacing: 10) {
                 ProgressView().controlSize(.large)
-                Text("최고 화질 찾는 중…").foregroundStyle(.white.opacity(0.8))
+                Text("최고 화질로 연결하고 있어요").font(.headline).foregroundStyle(.white)
+                Text("연결이 어려우면 사이트 플레이어로 전환됩니다.")
+                    .font(.caption).foregroundStyle(.white.opacity(0.65))
+                Button("사이트 플레이어로 열기") { loader.stop(); loader.showSitePlayer() }
+                    .buttonStyle(.bordered).tint(.white)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .native(let player):
@@ -594,6 +616,10 @@ final class PlayerLoader: ObservableObject {
 
     func start(_ item: PlayerItem) {
         guard task == nil else { return }
+        mode = .finding
+        subtitle = "연결 중"
+        lowLink = nil
+        listenCache = nil
         task = Task {
             do {
                 let links = try await DownloadLoader.findLinks(pageURL: item.url)
@@ -627,6 +653,11 @@ final class PlayerLoader: ObservableObject {
         }
     }
 
+    func showSitePlayer() {
+        stop()
+        useEmbed()
+    }
+
     /// 파일을 못 여는 경우(형식·권한 문제) 사이트 플레이어로 바꿈
     private func watchForFailure(_ player: AVPlayer, item: PlayerItem) {
         statusObserver = player.currentItem?.observe(\.status) { [weak self] playerItem, _ in
@@ -656,6 +687,7 @@ final class PlayerLoader: ObservableObject {
 
     func stop() {
         task?.cancel()
+        task = nil
         statusObserver = nil
         sizeObserver = nil
         if case .native(let player) = mode { player.pause() }

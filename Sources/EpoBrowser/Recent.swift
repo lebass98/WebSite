@@ -91,7 +91,7 @@ struct RecentListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("최근 본 영상").font(.headline).foregroundStyle(.orange)
+                Text("최근 본 영상").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Text("\(store.items.count)").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if !store.items.isEmpty {

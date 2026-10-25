@@ -32,14 +32,27 @@ import com.local.epobrowser.data.*
 @Composable
 fun Sidebar(vm: AppViewModel, includeFilters: Boolean, onNavigate: () -> Unit, onLogin: () -> Unit) {
     val context = LocalContext.current
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false },
+        title = { Text("최근 본 영상을 모두 지울까요?") },
+        text = { Text("최근 본 영상 ${vm.recent.size}개의 기록을 지웁니다.") },
+        confirmButton = { TextButton(onClick = { vm.clearRecent(); confirmClear = false }) { Text("모두 지우기") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("취소") } },
+    )
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp)) {
-        item { Header("검색") }
+        item {
+            Text("EpoBrowser", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 16.dp))
+            Text("나만의 미디어 라이브러리", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
+        }
+        item { Header("탐색 · 검색 유형") }
         items(SearchType.entries) { t ->
             MenuRow(t.label, Icons.Default.Search, selected = vm.searchType == t && vm.stack.size == 1 && isSearchRoot(vm, t)) {
                 vm.search(vm.searchText, t); onNavigate()
             }
         }
-        item { Header("메뉴") }
+        item { Header("둘러보기") }
         item { MenuRow("베스트 영상", Icons.Default.LocalFireDepartment, vm.current == Screen.Videos("베스트 영상", "/best-videos/")) { vm.openRoot(Screen.Videos("베스트 영상", "/best-videos/")); onNavigate() } }
         item { MenuRow("최고 평점", Icons.Default.Star, vm.current == Screen.Videos("최고 평점", "/cat/all/SORT-top-rated/")) { vm.openRoot(Screen.Videos("최고 평점", "/cat/all/SORT-top-rated/")); onNavigate() } }
         item { MenuRow("카테고리", Icons.Default.GridView, vm.current == Screen.Categories) { vm.openRoot(Screen.Categories); onNavigate() } }
@@ -64,8 +77,8 @@ fun Sidebar(vm: AppViewModel, includeFilters: Boolean, onNavigate: () -> Unit, o
 
         item {
             Row(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("최근 본 영상 ${vm.recent.size}", fontWeight = FontWeight.Bold, color = Highlight, modifier = Modifier.weight(1f))
-                if (vm.recent.isNotEmpty()) TextButton(onClick = { vm.clearRecent() }) { Text("모두 지우기", fontSize = 12.sp) }
+                Text("최근 본 영상 ${vm.recent.size}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                if (vm.recent.isNotEmpty()) TextButton(onClick = { confirmClear = true }) { Text("모두 지우기", fontSize = 12.sp) }
             }
         }
         if (vm.recent.isEmpty()) item { Text("영상을 보면 여기에 쌓여요.", style = MaterialTheme.typography.bodySmall) }
@@ -94,14 +107,14 @@ private fun isSearchRoot(vm: AppViewModel, t: SearchType) = when (val s = vm.cur
 
 @Composable
 private fun Header(text: String) {
-    Text(text, color = Highlight, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+    Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
 }
 
 @Composable
 private fun MenuRow(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
     NavigationDrawerItem(
         label = { Text(label, maxLines = 1) }, icon = { Icon(icon, null) }, selected = selected, onClick = onClick,
-        modifier = Modifier.height(44.dp),
+        modifier = Modifier.heightIn(min = 48.dp),
     )
 }
 
@@ -111,7 +124,7 @@ private fun MenuRow(label: String, icon: ImageVector, selected: Boolean, onClick
 fun FilterPanel(vm: AppViewModel, onApplied: () -> Unit) {
     var showCats by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("화질", color = Highlight, fontWeight = FontWeight.Bold)
+        Text("화질", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Quality.entries.forEach { q ->
                 FilterChip(selected = vm.draft.quality == q, onClick = { vm.draft = vm.draft.copy(quality = q) }, label = { Text(q.label) })
@@ -119,7 +132,7 @@ fun FilterPanel(vm: AppViewModel, onApplied: () -> Unit) {
         }
         Text("VR은 VR에서만 나오고, 다른 화질에서는 빠져요.", style = MaterialTheme.typography.bodySmall)
 
-        Text("길이 (분)", color = Highlight, fontWeight = FontWeight.Bold)
+        Text("길이 (분)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         val d = vm.draft
         Row(Modifier.fillMaxWidth()) {
             Text("최소 ${d.minMinutes}분", Modifier.weight(1f))
@@ -131,7 +144,7 @@ fun FilterPanel(vm: AppViewModel, onApplied: () -> Unit) {
             valueRange = 0f..Filters.OPEN_MAX.toFloat(),
         )
 
-        Text("카테고리", color = Highlight, fontWeight = FontWeight.Bold)
+        Text("카테고리", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         OutlinedButton(onClick = { showCats = !showCats }, modifier = Modifier.fillMaxWidth()) {
             Text("${d.categories.size}개 선택 (최대 ${Filters.MAX_CATEGORIES}개)", Modifier.weight(1f))
             Icon(if (showCats) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)

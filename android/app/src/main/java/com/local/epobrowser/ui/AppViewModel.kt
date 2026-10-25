@@ -238,15 +238,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val tags = mutableStateListOf<TagItem>()
     var tagsLoading by mutableStateOf(false)
     private val tagCache = mutableMapOf<String, List<TagItem>>()
+    var tagsError by mutableStateOf<String?>(null)
+        private set
+    private var tagsJob: Job? = null
+    private var tagsRequest = 0
 
     fun loadTags(letter: String) {
+        tagsJob?.cancel()
+        val request = ++tagsRequest
         tagLetter = letter
+        tagsError = null
+        tagsLoading = false
         tagCache[letter]?.let { tags.clear(); tags.addAll(it); return }
         tagsLoading = true; tags.clear()
-        viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { SiteScraper.parseTags(Http.get("${Http.BASE}/cats/$letter/")) } }
-                .onSuccess { tagCache[letter] = it; if (tagLetter == letter) { tags.clear(); tags.addAll(it) } }
-            tagsLoading = false
+        tagsJob = viewModelScope.launch {
+            try {
+                val found = withContext(Dispatchers.IO) { SiteScraper.parseTags(Http.get("${Http.BASE}/cats/$letter/")) }
+                tagCache[letter] = found
+                tags.clear(); tags.addAll(found)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                tagsError = "카테고리를 불러오지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+            } finally {
+                if (tagsRequest == request) tagsLoading = false
+            }
         }
     }
 

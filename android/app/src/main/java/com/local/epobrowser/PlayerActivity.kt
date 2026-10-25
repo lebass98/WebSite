@@ -14,6 +14,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ProgressBar
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Button
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.annotation.OptIn
@@ -48,6 +51,7 @@ class PlayerActivity : ComponentActivity() {
 
     private lateinit var root: DoubleTapFrame
     private var player: ExoPlayer? = null
+    private var embeddedWeb: WebView? = null
     private var fullScreen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,7 +59,20 @@ class PlayerActivity : ComponentActivity() {
         Http.init(this)
         root = DoubleTapFrame(this) { toggleFullScreen() }
         root.setBackgroundColor(0xFF000000.toInt())
-        root.addView(ProgressBar(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER))
+        val loading = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(32, 32, 32, 32)
+            addView(ProgressBar(this@PlayerActivity))
+            addView(TextView(this@PlayerActivity).apply {
+                text = "최고 화질로 연결하고 있어요"
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 16f
+                setPadding(0, 24, 0, 24)
+            })
+            addView(Button(this@PlayerActivity).apply { text = "목록으로 돌아가기"; setOnClickListener { finish() } })
+        }
+        root.addView(loading, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         title = intent.getStringExtra("title")
 
@@ -117,6 +134,7 @@ class PlayerActivity : ComponentActivity() {
         val embed = intent.getStringExtra("embed") ?: return
         val cm = CookieManager.getInstance()
         Http.cookies.all().forEach { c -> cm.setCookie("https://${c.domain}", "${c.name}=${c.value}; path=${c.path}") }
+        embeddedWeb?.destroy()
         val web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -126,6 +144,22 @@ class PlayerActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
                 // 광고 등 다른 페이지로 넘어가는 클릭은 막음
                 override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest) = request.isForMainFrame && request.hasGesture()
+                override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
+                    if (!request.isForMainFrame) return
+                    val message = LinearLayout(this@PlayerActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = android.view.Gravity.CENTER
+                        setPadding(32, 32, 32, 32)
+                        addView(TextView(this@PlayerActivity).apply {
+                            text = "재생 화면에 연결하지 못했어요"
+                            setTextColor(android.graphics.Color.WHITE); textSize = 18f
+                        })
+                        addView(Button(this@PlayerActivity).apply { text = "다시 시도"; setOnClickListener { playEmbed() } })
+                        addView(Button(this@PlayerActivity).apply { text = "목록으로 돌아가기"; setOnClickListener { finish() } })
+                    }
+                    root.removeAllViews()
+                    root.addView(message, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                }
                 override fun onPageFinished(view: WebView, url: String) {
                     view.evaluateJavascript(
                         "(function(){var n=0;var t=setInterval(function(){n++;var v=document.querySelector('video');" +
@@ -135,6 +169,7 @@ class PlayerActivity : ComponentActivity() {
             }
             loadUrl(embed)
         }
+        embeddedWeb = web
         root.removeAllViews()
         root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
@@ -152,8 +187,9 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    override fun onStop() { super.onStop(); player?.pause() }
-    override fun onDestroy() { super.onDestroy(); player?.release() }
+    override fun onStop() { super.onStop(); player?.pause(); embeddedWeb?.onPause() }
+    override fun onStart() { super.onStart(); embeddedWeb?.onResume() }
+    override fun onDestroy() { embeddedWeb?.stopLoading(); embeddedWeb?.destroy(); embeddedWeb = null; player?.release(); super.onDestroy() }
 }
 
 /** 화면 아무 곳이나 더블탭을 알아챔 (한 번 탭은 아래 플레이어가 그대로 받음) */

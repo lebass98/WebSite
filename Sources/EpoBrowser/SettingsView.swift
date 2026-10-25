@@ -12,13 +12,26 @@ struct SettingsView: View {
     @StateObject private var form = LoginForm()
     @ObservedObject private var session = SiteSession.shared
     @ObservedObject private var backup = Backup.shared
+    @ObservedObject private var appearance = AppearanceSetting.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
             Section {
+                LibraryHeader(title: "설정", subtitle: "화면, 계정과 라이브러리 백업", icon: "gearshape")
+            }
+            Section("화면") {
+                Picker("화면 모드", selection: $appearance.mode) {
+                    ForEach(AppearanceSetting.Mode.allCases, id: \.self) { mode in
+                        Label(mode.label, systemImage: mode.icon).tag(mode)
+                    }
+                }
+            }
+            Section {
                 TextField("아이디 또는 이메일", text: $form.username)
+                    .disabled(session.status == .loggingIn)
                 SecureField("비밀번호", text: $form.password)
+                    .disabled(session.status == .loggingIn)
             } header: {
                 Text("로그인 정보")
             } footer: {
@@ -34,7 +47,7 @@ struct SettingsView: View {
                     session.login()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(form.username.isEmpty || form.password.isEmpty)
+                .disabled(form.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || form.password.isEmpty || session.status == .loggingIn)
 
                 Button("저장된 정보 지우기", role: .destructive) {
                     Keychain.delete()
@@ -76,7 +89,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 720)
+        .frame(width: 520, height: 740)
         .onAppear {
             if let cred = Keychain.load() {
                 form.username = cred.username

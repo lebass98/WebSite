@@ -58,13 +58,6 @@ OUT="dist/EpoBrowser-$VERSION.pkg"
 rm -f "$OUT"
 cp -X "$WORK/final.pkg" "$OUT"
 
-# 이전 버전 설치 파일은 지우고 최신 파일 하나만 남김 (외장하드 숨김 파일 ._* 포함)
-for old in dist/EpoBrowser-*.pkg; do
-    if [ "$old" != "$OUT" ]; then
-        echo "▶ 이전 파일 삭제: $old"
-        rm -f "$old"
-    fi
-done
-rm -f dist/._*
+# 이전 배포 파일은 보존한다. 업데이트 피드는 latest.json에서 최신 버전을 선택한다.
 
 echo "✅ 완료: $(pwd)/$OUT"

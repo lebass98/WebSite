@@ -70,7 +70,13 @@ struct UserPageView: View {
             case .collection(let kind):
                 CollectionView(model: ModelCache.shared.collection(kind), onOpen: onOpen)
             case .web(let url):
-                EmbedWebView(url: url, allowNavigation: true)
+                VStack(spacing: 0) {
+                    LibraryHeader(title: model.link.kind.label,
+                                  subtitle: "연결된 사이트의 계정 화면입니다", icon: "person.crop.circle")
+                        .padding(20)
+                    Divider()
+                    EmbedWebView(url: url, allowNavigation: true).id(url)
+                }
                     .navigationTitle(model.link.kind.label)
                     .toolbar {
                         ToolbarItem {

@@ -8,6 +8,8 @@ struct CategoryGridView: View {
 
     var body: some View {
         ScrollView {
+            LibraryHeader(title: "카테고리", subtitle: "관심 있는 주제로 라이브러리를 둘러보세요", icon: "square.grid.2x2")
+                .padding(24)
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(SiteCategory.sorted) { cat in
                     Button {
@@ -37,10 +39,10 @@ final class TagListModel: ObservableObject {
     private var task: Task<Void, Never>?
 
     func load() {
-        if let cached = cache[letter] { tags = cached; return }
         task?.cancel()
-        isLoading = true
         errorMessage = nil
+        if let cached = cache[letter] { tags = cached; isLoading = false; return }
+        isLoading = true
         tags = []
         let l = letter
         task = Task {
@@ -67,7 +69,7 @@ struct AllCategoriesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("All Categories - \(model.letter)").font(.title2.bold())
+            Text("전체 카테고리 · \(model.letter)").font(.title2.bold())
             // A~Z 버튼
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 30), spacing: 6)], spacing: 6) {
                 ForEach(letters, id: \.self) { l in
@@ -136,6 +138,12 @@ struct CollectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text(model.kind.title).font(.title2.weight(.bold))
+                Spacer()
+                Text("\(model.visibleItems.count)개 표시").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(20)
             if model.usesPornstarFilters {
                 PornstarFilterBar()
                 Divider()
@@ -172,12 +180,14 @@ struct CollectionView: View {
                 ProgressView("불러오는 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.items.isEmpty, let error = model.errorMessage {
                 VStack(spacing: 12) {
-                    Text(error).foregroundStyle(.secondary)
-                    Button("다시 시도") { model.loadNextPage() }
+                    LibraryEmptyState(icon: "wifi.exclamationmark", title: "목록을 불러오지 못했어요", message: error)
+                    Button("다시 시도") { model.loadNextPage() }.buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.items.isEmpty && !model.hasMore {
-                Text("결과가 없어요").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                LibraryEmptyState(icon: "square.stack", title: "아직 표시할 항목이 없어요",
+                                  message: "다른 검색어나 카테고리로 다시 찾아보세요.")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 18) {
@@ -188,7 +198,14 @@ struct CollectionView: View {
                         }
                     }
                     .padding(16)
-                    if model.isLoading { ProgressView().padding(.bottom, 20) }
+                    if model.isLoading {
+                        ProgressView().padding(.bottom, 20)
+                    } else if let error = model.errorMessage {
+                        VStack(spacing: 8) {
+                            Text(error).font(.caption).foregroundStyle(.secondary)
+                            Button("이어서 불러오기") { model.loadNextPage() }
+                        }.padding(20)
+                    }
                 }
             }
         }
@@ -213,6 +230,9 @@ struct CollectionView: View {
                 Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
             }
         }
+        .padding(10)
+        .background(EpoStyle.surface, in: RoundedRectangle(cornerRadius: EpoStyle.radius))
+        .overlay(RoundedRectangle(cornerRadius: EpoStyle.radius).strokeBorder(Color.primary.opacity(0.06)))
         .contentShape(Rectangle())
     }
 }
