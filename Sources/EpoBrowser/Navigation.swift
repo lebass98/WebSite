@@ -108,4 +108,3 @@ final class NavState: ObservableObject {
 
     func open(_ route: Route) { path.append(route) }
 }
-
