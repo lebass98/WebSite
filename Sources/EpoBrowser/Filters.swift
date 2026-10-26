@@ -52,6 +52,17 @@ struct VideoFilters: Equatable {
     static let maxCategories = 5
 
     var isDefault: Bool { self == VideoFilters() }
+
+    var summary: String {
+        var parts: [String] = []
+        if quality != .all { parts.append(quality.label) }
+        if minMinutes > 0 || maxMinutes < Self.openMax {
+            let maximum = maxMinutes >= Self.openMax ? "1시간 이상" : "\(maxMinutes)분"
+            parts.append("\(minMinutes)분–\(maximum)")
+        }
+        if !categories.isEmpty { parts.append("카테고리 \(categories.count)개") }
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// 사이드바 상태: 고르는 중인 값(draft)과 적용된 값(applied), 검색어

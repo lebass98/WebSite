@@ -119,7 +119,7 @@ final class PornstarFilterStore: ObservableObject {
 }
 
 final class FilterBarState: ObservableObject {
-    @Published var expanded = true
+    @Published var expanded = false
 }
 
 /// 포르노스타 목록 위쪽 필터 (사이트의 FILTERS를 가로로 재배치)
@@ -134,7 +134,7 @@ struct PornstarFilterBar: View {
         VStack(alignment: .leading, spacing: 12) {
             // 첫 줄: 제목·측정 단위·적용/초기화·접기
             HStack(spacing: 12) {
-                Text("필터").font(.headline).foregroundStyle(.orange)
+                Text("필터").font(.headline).foregroundStyle(EpoStyle.accent)
                 Picker("측정 단위", selection: $store.draft.inches) {
                     Text("센티미터").tag(false)
                     Text("인치").tag(true)
@@ -142,14 +142,14 @@ struct PornstarFilterBar: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 if !store.applied.isDefault {
-                    Text("적용 중").font(.caption).foregroundStyle(.orange)
+                    Text("적용 중").font(.caption).foregroundStyle(EpoStyle.accent)
                 }
                 Spacer()
                 Button("초기화") { store.clear() }
                     .disabled(store.draft.isDefault && store.applied.isDefault)
                 Button("적용") { store.apply() }
                     .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                    .tint(EpoStyle.accent)
                     .disabled(!store.hasChanges)
                 Button {
                     state.expanded.toggle()
@@ -184,12 +184,12 @@ struct PornstarFilterBar: View {
         let r = range.wrappedValue
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.subheadline.bold()).foregroundStyle(.orange)
+                Text(title).font(.subheadline.bold()).foregroundStyle(EpoStyle.accent)
                 Spacer()
                 Text("\(valueText(r.low, edge: r.low == r.bounds.lowerBound ? "≤ " : "", unitless: unitless)) ~ \(valueText(r.high, edge: r.high == r.bounds.upperBound ? "≥ " : "", unitless: unitless))")
                     .font(.caption.monospacedDigit())
             }
-            RangeSlider(low: range.low, high: range.high, range: r.bounds)
+            RangeSlider(low: range.low, high: range.high, range: r.bounds, accessibilityTitle: title, accessibilityUnit: unitless ? "" : (store.draft.inches ? "센티미터, 인치로 표시" : "센티미터"))
                 .frame(height: 20)
         }
     }

@@ -163,16 +163,19 @@ struct DownloadSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("다운로드 주소").font(.title3.bold())
+            LibraryHeader(title: "다운로드 주소", subtitle: "원하는 화질의 주소를 복사하세요", icon: "arrow.down.circle")
             Text(video.title).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+            Text("화질을 선택해 다운로드 주소를 복사하세요.")
+                .font(.caption).foregroundStyle(.secondary)
 
             switch loader.state {
             case .loading:
                 HStack { ProgressView().controlSize(.small); Text("영상 페이지에서 링크 찾는 중…") }
                     .frame(maxWidth: .infinity, minHeight: 80)
             case .failed(let message):
-                Text(message).foregroundStyle(.red).frame(maxWidth: .infinity, minHeight: 80)
-                Button("다시 시도") { loader.load(pageURL: video.url) }
+                LibraryEmptyState(icon: "arrow.down.circle", title: "주소를 찾지 못했어요", message: message)
+                    .frame(maxWidth: .infinity)
+                Button("다시 시도") { loader.load(pageURL: video.url) }.buttonStyle(.borderedProminent)
             case .done(let links):
                 ScrollView {
                     VStack(spacing: 8) {
@@ -242,17 +245,21 @@ final class Toast: ObservableObject {
 
 struct ToastView: View {
     @ObservedObject var toast = Toast.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if let message = toast.message {
             Label(message, systemImage: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                 .font(.callout.weight(.medium))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 480)
                 .foregroundStyle(toast.isError ? .orange : .green)
                 .padding(.horizontal, 16).padding(.vertical, 10)
                 .background(.regularMaterial, in: Capsule())
                 .shadow(radius: 6)
                 .padding(.bottom, 20)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
         }
     }
 }

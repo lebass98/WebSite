@@ -11,13 +11,14 @@ struct EpoBrowserApp: App {
     var body: some Scene {
         WindowGroup("EpoBrowser", id: "main") {
             RootView()
+                .tint(EpoStyle.accent)
                 .frame(minWidth: 1000, minHeight: 600)
         }
 
         // 영상마다 따로 뜨는 재생 창
         // 재생 창은 하나만: 다른 영상을 고르면 창은 그대로 두고 영상만 바뀜
         Window("재생", id: "player") {
-            PlayerHost()
+            PlayerHost().tint(EpoStyle.accent)
         }
         .defaultSize(width: 960, height: 580)
 
@@ -33,7 +34,7 @@ struct EpoBrowserApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView().tint(EpoStyle.accent)
         }
     }
 }

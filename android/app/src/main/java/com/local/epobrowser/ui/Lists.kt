@@ -74,16 +74,20 @@ fun VideoListScreen(vm: AppViewModel, s: VideoListState, size: LayoutSize) {
                 s.category = if (it == 0) null else SiteCategory.all[it - 1]; vm.reload(s)
             }
             Dropdown("게이", s.gay.label, Inclusion.entries.map { it.label }) { s.gay = Inclusion.entries[it]; vm.reload(s) }
-            AssistChip(onClick = { showAllCats = true }, label = { Text("All Categories") }, leadingIcon = { Icon(Icons.Default.List, null) })
+            AssistChip(onClick = { showAllCats = true }, label = { Text("전체 카테고리") }, leadingIcon = { Icon(Icons.Default.List, null) })
             Icon(Icons.Default.PhotoSizeSelectSmall, "썸네일 크기", Modifier.size(18.dp))
             Slider(value = vm.thumbWidth.toFloat(), onValueChange = { vm.setThumb(it.toInt()) }, valueRange = 120f..420f, modifier = Modifier.width(140.dp))
         }
         HorizontalDivider()
 
         when {
-            s.error != null && s.videos.isEmpty() -> Message(s.error!!) { vm.reload(s) }
+            s.error != null && s.videos.isEmpty() -> Message(s.error!!, retry = { vm.reload(s) })
             visible.isEmpty() && (s.loading || s.hasMore && s.videos.isEmpty()) -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
-            visible.isEmpty() -> Message("조건에 맞는 영상이 없어요", if (s.hasMore) ({ vm.loadMore(s) }) else null)
+            visible.isEmpty() -> Message(
+                "조건에 맞는 영상이 없어요. 검색어나 세부 필터를 바꿔보세요.",
+                if (s.hasMore) ({ vm.loadMore(s) }) else if (!vm.applied.isDefault) ({ vm.clearFilters() }) else null,
+                if (s.hasMore) "더 찾아보기" else "세부 필터 초기화",
+            )
             else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(vm.thumbWidth.dp),
                 contentPadding = PaddingValues(12.dp),
@@ -103,6 +107,11 @@ fun VideoListScreen(vm: AppViewModel, s: VideoListState, size: LayoutSize) {
                 }
                 if (s.loading) item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(Modifier.fillMaxWidth().padding(16.dp), Alignment.Center) { CircularProgressIndicator() }
+                } else if (s.error != null) item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(s.error!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = { vm.loadMore(s) }) { Text("이어서 불러오기") }
+                    }
                 }
             }
         }
@@ -128,17 +137,21 @@ private fun Dropdown(label: String, value: String, options: List<String>, onPick
 }
 
 @Composable
-fun Message(text: String, retry: (() -> Unit)?) {
+fun Message(text: String, retry: (() -> Unit)?, actionLabel: String = "다시 시도") {
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text)
-        if (retry != null) { Spacer(Modifier.height(12.dp)); Button(onClick = retry) { Text("다시 시도") } }
+        Icon(Icons.Default.Info, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(16.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (retry != null) { Spacer(Modifier.height(16.dp)); Button(onClick = retry) { Text(actionLabel) } }
     }
 }
 
 @kotlin.OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCard(v: Video, watched: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onUploader: (String, String) -> Unit = { _, _ -> }) {
-    Column(Modifier.clip(RoundedCornerShape(8.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Column(Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+        .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(10.dp)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha = 0.2f))) {
             AsyncImage(v.thumb, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             Row(Modifier.padding(5.dp).align(Alignment.TopStart), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -150,7 +163,7 @@ fun VideoCard(v: Video, watched: Boolean, onClick: () -> Unit, onLongClick: () -
                 modifier = Modifier.align(Alignment.BottomEnd).padding(5.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp))
         }
         Text(v.title, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Column {
             Text("조회 ${v.views}  ★ ${"%.1f".format(v.rate)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             // 올린 사람 프로필 바로가기
             if (v.uploaderName != null && v.uploaderPath != null) {
@@ -184,7 +197,7 @@ fun VideoActionsSheet(vm: AppViewModel, v: Video, onDismiss: () -> Unit) {
     val toast: (String) -> Unit = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 640.dp).verticalScrollCompat(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScrollCompat().navigationBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(v.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             v.previewUrl?.let { PreviewVideo(it) }
             // 재생 방법을 골라서 재생
@@ -195,7 +208,7 @@ fun VideoActionsSheet(vm: AppViewModel, v: Video, onDismiss: () -> Unit) {
                     }, modifier = Modifier.weight(1f)) { Text(label, maxLines = 1, fontSize = 12.sp) }
                 }
             }
-            TextButton(onClick = {
+            TextButton(enabled = !busy, onClick = {
                 busy = true
                 scope.launch {
                     val found = runCatching { vm.downloadLinks(v.url) }.getOrDefault(emptyList())
@@ -205,9 +218,18 @@ fun VideoActionsSheet(vm: AppViewModel, v: Video, onDismiss: () -> Unit) {
                     else { copy(context, best.url); toast("${best.qualityText} 다운로드 주소를 복사했어요") }
                 }
             }) { Text(if (busy) "찾는 중…" else "다운로드 주소 복사 (최고 화질)") }
-            TextButton(onClick = { scope.launch { links = runCatching { vm.downloadLinks(v.url) }.getOrDefault(emptyList()) } }) { Text("화질 골라서 복사…") }
+            TextButton(enabled = !busy, onClick = {
+                busy = true
+                scope.launch {
+                    try { links = vm.downloadLinks(v.url) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { links = emptyList() }
+                    finally { busy = false }
+                }
+            }) { Text("화질 골라서 복사…") }
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             links?.let { list ->
-                if (list.isEmpty()) Text("다운로드 링크가 없어요.")
+                if (list.isEmpty()) Text("주소를 찾지 못했어요. 로그인과 연결 상태를 확인하고 다시 시도하세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 list.sortedByDescending { it.height }.forEach { l ->
                     OutlinedButton(onClick = { copy(context, l.url); toast("${l.qualityText} 주소를 복사했어요") }, modifier = Modifier.fillMaxWidth()) {
                         Text("${l.qualityText} · ${l.label}", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -279,7 +301,7 @@ fun CategoryGrid(vm: AppViewModel) {
 fun AllCategoriesScreen(vm: AppViewModel, onPick: (TagItem) -> Unit) {
     LaunchedEffect(Unit) { if (vm.tags.isEmpty()) vm.loadTags(vm.tagLetter) }
     Column(Modifier.fillMaxSize().padding(12.dp)) {
-        Text("All Categories - ${vm.tagLetter}", style = MaterialTheme.typography.titleLarge)
+        Text("전체 카테고리 · ${vm.tagLetter}", style = MaterialTheme.typography.titleLarge)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 8.dp)) {
             ('A'..'Z').forEach { c ->
                 val l = c.toString()
@@ -287,6 +309,8 @@ fun AllCategoriesScreen(vm: AppViewModel, onPick: (TagItem) -> Unit) {
             }
         }
         if (vm.tagsLoading) Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+        else if (vm.tagsError != null) Message(vm.tagsError!!, retry = { vm.loadTags(vm.tagLetter) })
+        else if (vm.tags.isEmpty()) Message("이 글자로 시작하는 카테고리가 없어요", null)
         else LazyVerticalGrid(GridCells.Adaptive(170.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(vm.tags) { t ->
                 Row(Modifier.clip(RoundedCornerShape(4.dp)).combinedClickableCompat { onPick(t) }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -310,14 +334,15 @@ fun CollectionScreen(vm: AppViewModel, s: CollectionState, size: LayoutSize) {
         if (s.kind.usesPornstarFilters) { PornstarFilterBar(vm, compact = size == LayoutSize.Compact); HorizontalDivider() }
         when {
             s.items.isEmpty() && s.loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
-            s.items.isEmpty() && s.error != null -> Message(s.error!!) { vm.reloadCollection(s) }
+            s.items.isEmpty() && s.error != null -> Message(s.error!!, retry = { vm.reloadCollection(s) })
             s.items.isEmpty() -> Message("결과가 없어요", null)
             else -> LazyVerticalGrid(
                 GridCells.Adaptive(if (s.kind.style == CollectionStyle.Pornstar) 150.dp else 200.dp),
                 contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(s.items, key = { it.path }) { item ->
-                    Column(Modifier.clip(RoundedCornerShape(8.dp)).combinedClickableCompat { vm.open(Screen.Videos(item.title, item.path)) }) {
+                    Column(Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+                        .combinedClickableCompat { vm.open(Screen.Videos(item.title, item.path)) }.padding(10.dp)) {
                         AsyncImage(item.image, null,
                             contentScale = if (s.kind.style == CollectionStyle.Channel) ContentScale.Fit else ContentScale.Crop,
                             modifier = Modifier.fillMaxWidth().aspectRatio(s.kind.imageRatio).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha = 0.2f)))
@@ -325,6 +350,14 @@ fun CollectionScreen(vm: AppViewModel, s: CollectionState, size: LayoutSize) {
                         if (item.subtitle.isNotEmpty()) Text(item.subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (item.path == s.items.last().path) LaunchedEffect(item.path) { vm.loadMoreCollection(s) }
+                }
+                if (s.loading) item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().padding(20.dp), Alignment.Center) { CircularProgressIndicator() }
+                } else if (s.error != null) item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(s.error!!)
+                        TextButton(onClick = { vm.loadMoreCollection(s) }) { Text("이어서 불러오기") }
+                    }
                 }
             }
         }
@@ -335,11 +368,11 @@ fun CollectionScreen(vm: AppViewModel, s: CollectionState, size: LayoutSize) {
 @kotlin.OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PornstarFilterBar(vm: AppViewModel, compact: Boolean) {
-    var expanded by remember { mutableStateOf(!compact) }
+    var expanded by remember { mutableStateOf(false) }
     val d = vm.pornstarDraft
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("필터", color = Highlight, fontWeight = FontWeight.Bold)
+        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("필터", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             FilterChip(selected = !d.inches, onClick = { vm.pornstarDraft = d.copy(inches = false) }, label = { Text("cm") })
             FilterChip(selected = d.inches, onClick = { vm.pornstarDraft = d.copy(inches = true) }, label = { Text("inch") })
             Spacer(Modifier.weight(1f))
@@ -368,7 +401,7 @@ private fun RangeBox(title: String, value: IntRange, bounds: IntRange, unitless:
     fun text(v: Int, edge: String) = when { unitless -> "$v"; inches -> "$edge${Math.round(v / 2.54)} in"; else -> "$edge$v cm" }
     Column(modifier) {
         Row {
-            Text(title, color = Highlight, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(title, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f))
             Text("${text(value.first, if (value.first == bounds.first) "≤ " else "")} ~ ${text(value.last, if (value.last == bounds.last) "≥ " else "")}", fontSize = 12.sp)
         }
         RangeSlider(value = value.first.toFloat()..value.last.toFloat(),
@@ -404,16 +437,40 @@ private fun ChoiceMenu(vm: AppViewModel, f: ChoiceField) {
 
 @Composable
 fun WebScreen(url: String) {
-    AndroidView(factory = { ctx ->
-        // 앱의 로그인 쿠키를 웹 화면에도 넣어 줌
+    val context = LocalContext.current
+    var loading by remember(url) { mutableStateOf(true) }
+    var failed by remember(url) { mutableStateOf(false) }
+    val web = remember(url) {
         val cm = CookieManager.getInstance()
         Http.cookies.all().forEach { c -> cm.setCookie("https://${c.domain}", "${c.name}=${c.value}; path=${c.path}") }
-        WebView(ctx).apply {
+        WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.userAgentString = Http.USER_AGENT
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, target: String, favicon: android.graphics.Bitmap?) {
+                    loading = true; failed = false
+                }
+                override fun onPageFinished(view: WebView, target: String) { loading = false }
+                override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
+                    if (request.isForMainFrame) { failed = true; loading = false }
+                }
+            }
             loadUrl(url)
         }
-    }, modifier = Modifier.fillMaxSize())
+    }
+    DisposableEffect(web) { onDispose { web.stopLoading(); web.destroy() } }
+    Column(Modifier.fillMaxSize()) {
+        Text("연결된 사이트의 계정 화면", style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Box(Modifier.weight(1f)) {
+            key(url) { AndroidView(factory = { web }, modifier = Modifier.fillMaxSize()) }
+            if (failed) Surface(Modifier.fillMaxSize()) {
+                Message("계정 화면에 연결하지 못했어요", retry = {
+                    failed = false; loading = true; web.loadUrl(url)
+                })
+            }
+        }
+    }
 }

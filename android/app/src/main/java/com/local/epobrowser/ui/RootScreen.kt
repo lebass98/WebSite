@@ -2,12 +2,16 @@ package com.local.epobrowser.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,7 +84,11 @@ fun RootScreen(vm: AppViewModel) {
 
         if (showFilters) {
             ModalBottomSheet(onDismissRequest = { showFilters = false }) {
-                FilterPanel(vm, onApplied = { showFilters = false })
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp)) {
+                    Text("세부 필터", style = MaterialTheme.typography.titleLarge)
+                    Text("조건을 고른 뒤 필터를 적용하세요", style = MaterialTheme.typography.bodySmall)
+                    FilterPanel(vm, onApplied = { showFilters = false })
+                }
             }
         }
         if (showLogin) LoginDialog(vm) { showLogin = false }
@@ -97,6 +105,11 @@ private fun TopBar(
 ) {
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(vm.searchText) }
+    var more by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(searching) {
+        if (searching) { query = vm.searchText; searchFocus.requestFocus() }
+    }
     TopAppBar(
         navigationIcon = {
             when {
@@ -109,7 +122,7 @@ private fun TopBar(
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     placeholder = { Text("${vm.searchType.label} 검색") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { vm.search(query); searching = false }),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                     trailingIcon = {
@@ -130,37 +143,33 @@ private fun TopBar(
             if (showFilterButton) IconButton(onClick = onFilters) {
                 BadgedBox(badge = { if (!vm.applied.isDefault) Badge() }) { Icon(Icons.Default.Tune, "필터") }
             }
-            PlayerModeMenu(vm)
-            IconButton(onClick = { vm.cycleTheme() }) {
-                Icon(when (vm.themeMode) { 1 -> Icons.Default.LightMode; 2 -> Icons.Default.DarkMode; else -> Icons.Default.Contrast }, "화면 모드")
-            }
-            IconButton(onClick = onLogin) {
-                Icon(
-                    if (vm.loginState == LoginState.LoggedIn) Icons.Default.AccountCircle else Icons.Default.PersonOutline, "로그인",
-                    tint = if (vm.loginState == LoginState.LoggedIn) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                )
+            Box {
+                IconButton(onClick = { more = true }) { Icon(Icons.Default.MoreVert, "더 보기") }
+                DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                    DropdownMenuItem(
+                        text = { Text("화면 모드 변경") },
+                        leadingIcon = { Icon(Icons.Default.Contrast, null) },
+                        onClick = { vm.cycleTheme(); more = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (vm.loginState == LoginState.LoggedIn) "내 계정" else "로그인") },
+                        leadingIcon = { Icon(Icons.Default.AccountCircle, null) },
+                        onClick = { more = false; onLogin() },
+                    )
+                    HorizontalDivider()
+                    Text("재생 방법", style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    PlayerMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(mode.label) },
+                            leadingIcon = { RadioButton(selected = vm.playerMode == mode, onClick = null) },
+                            onClick = { vm.setPlayer(mode); more = false },
+                        )
+                    }
+                }
             }
         },
     )
-}
-
-/** 위쪽 막대의 재생 방법 고르기 */
-@Composable
-private fun PlayerModeMenu(vm: AppViewModel) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }) { Icon(Icons.Default.SmartDisplay, "재생 방법") }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            Text("재생 방법", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-            PlayerMode.entries.forEach { m ->
-                DropdownMenuItem(
-                    text = { Text(m.label) },
-                    leadingIcon = { RadioButton(selected = vm.playerMode == m, onClick = null) },
-                    onClick = { vm.setPlayer(m); open = false },
-                )
-            }
-        }
-    }
 }
 
 /** 중간 크기(폴드 펼친 화면 등)의 왼쪽 아이콘 메뉴 */
@@ -206,7 +215,8 @@ fun LoginDialog(vm: AppViewModel, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("사이트 로그인") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("로그인하면 저장한 컬렉션을 이용할 수 있어요.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(user, { user = it }, label = { Text("아이디") }, singleLine = true, enabled = !loggedIn && !busy)
                 OutlinedTextField(
                     pass, { pass = it }, label = { Text("비밀번호") }, singleLine = true, enabled = !loggedIn && !busy,
