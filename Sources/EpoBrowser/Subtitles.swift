@@ -455,7 +455,7 @@ final class SubtitleEngine: ObservableObject {
                 }
             }
             detectStart = Date()
-            status = candidates.count > 1 ? "언어 확인 중… (말소리를 듣고 있어요)" : "\(Self.name(candidates[0].locale)) → 한국어"
+            status = candidates.count > 1 ? "언어 확인 중… (말소리를 듣고 있어요)" : ""
             if candidates.count == 1 { choose(candidates[0]) }
             DebugLog.write("자막 시작: 후보 \(candidates.map(\.id))")
         } catch {
@@ -593,13 +593,12 @@ final class SubtitleEngine: ObservableObject {
         }
         candidates = [c]
         let name = Self.name(c.locale)
-        if c.locale.language.languageCode == .korean {
-            status = "한국어 (번역 없이 표시)"
-        } else {
-            status = "\(name) → 한국어"
+        // 언어가 정해지면 "일본어 → 한국어" 같은 안내는 띄우지 않음 (자막만 보이게)
+        status = ""
+        if c.locale.language.languageCode != .korean {
             translationConfig = TranslationSession.Configuration(source: c.locale.language, target: Locale.Language(identifier: "ko"))
         }
-        DebugLog.write("자막 언어: \(c.id)")
+        DebugLog.write("자막 언어: \(c.id) → \(c.locale.language.languageCode == .korean ? "번역 없이 표시" : "\(name) → 한국어")")
     }
 
     // MARK: 번역 (화면의 .translationTask 에서 부름)
