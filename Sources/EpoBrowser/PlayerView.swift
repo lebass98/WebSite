@@ -205,11 +205,17 @@ final class PlayerChrome: NSObject, ObservableObject {
         return false
     }
 
-    /// 숫자 키(수정 키 없이)로 배율 바꾸기 (재생 창이 선택돼 있고 글 입력 중이 아닐 때)
+    /// 숫자 키(수정 키 없이)로 배율 바꾸기, Esc로 재생 창 닫기 (재생 창이 선택돼 있고 글 입력 중이 아닐 때)
     private func handleKey(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
         let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
         guard mods.isEmpty, !(window.firstResponder is NSText) else { return false }
+        // Esc(키 코드 53): 재생 창 닫기 (닫히면 재생·자막도 멈춤)
+        if event.keyCode == 53 {
+            DebugLog.write("Esc → 재생 창 닫기")
+            window.close()
+            return true
+        }
         guard let key = event.charactersIgnoringModifiers,
               let scale = PlayerCenter.Scale.allCases.first(where: { $0.key == key }) else { return false }
         PlayerCenter.shared.resize(scale)
