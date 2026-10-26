@@ -28,15 +28,19 @@ find . -name '._*' -not -path './.build/*' -delete 2>/dev/null || true
 echo "▶ 깃허브에 올리는 중"
 git add -A
 git commit -q -m "릴리즈 $VERSION" -m "$(printf '%s\n' "$@")" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-git push -q origin main
+# 워크트리 브랜치에서 돌려도 main 으로 올라가게 (main 보다 뒤처져 있으면 push 가 거부됨)
+git push -q origin HEAD:main
 find .git -name '._*' -delete 2>/dev/null || true
 
 # 구글 드라이브: 공유용 (업데이트와는 상관없음)
 DRIVE=$(ls -d "$HOME"/Library/CloudStorage/GoogleDrive-*/"내 드라이브" 2>/dev/null | head -1 || true)
 if [ -n "$DRIVE" ]; then
-    mkdir -p "$DRIVE/EpoBrowser 배포판"
-    cp -X "dist/$FILE" "$DRIVE/EpoBrowser 배포판/"
-    echo "▶ 구글 드라이브에 복사: $DRIVE/EpoBrowser 배포판/$FILE"
+    # 앱 배포판은 AI작업/클로드앱/ 아래 (이미 있는 같은 이름 폴더가 있으면 그곳)
+    TARGET=$(find "$DRIVE" -maxdepth 4 -type d -name "EpoBrowser 배포판" 2>/dev/null | head -1 || true)
+    [ -z "$TARGET" ] && TARGET="$DRIVE/AI작업/클로드앱/EpoBrowser 배포판"
+    mkdir -p "$TARGET"
+    cp -X "dist/$FILE" "$TARGET/"
+    echo "▶ 구글 드라이브에 복사: $TARGET/$FILE"
 fi
 
 echo "✅ 릴리즈 $VERSION ($BUILD) 완료"
