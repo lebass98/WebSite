@@ -69,18 +69,16 @@ final class FavoritesStore: ObservableObject {
     }
 }
 
-/// 썸네일 위 즐겨찾기 별 (밝은 장면에서도 잘 보이게 어두운 원 안에 노란 별)
+/// 썸네일 위 즐겨찾기 별 (배경 원 없이 노란 별만, 밝은 장면용으로 아주 얇은 그림자)
 struct FavoriteStar: View {
     var size: CGFloat = 26
 
     var body: some View {
         Image(systemName: "star.fill")
-            .font(.system(size: size * 0.6, weight: .black))
+            .font(.system(size: size * 0.8, weight: .black))
             .foregroundStyle(.yellow)
             .frame(width: size, height: size)
-            .background(Circle().fill(.black.opacity(0.7)))
-            .overlay(Circle().strokeBorder(.yellow, lineWidth: max(1.5, size * 0.07)))
-            .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
+            .shadow(color: .black.opacity(0.5), radius: 1)
             .help("즐겨찾기한 영상")
     }
 }

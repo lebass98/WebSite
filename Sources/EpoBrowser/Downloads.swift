@@ -249,14 +249,19 @@ struct ToastView: View {
 
     var body: some View {
         if let message = toast.message {
-            Label(message, systemImage: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+            // 어느 화면 위에서도 잘 보이게 검정 배경에 흰 글씨 (아이콘만 색으로 성공·오류 구분)
+            Label {
+                Text(message).foregroundStyle(.white)
+            } icon: {
+                Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(toast.isError ? .orange : .green)
+            }
                 .font(.callout.weight(.medium))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 480)
-                .foregroundStyle(toast.isError ? .orange : .green)
                 .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
+                .background(.black.opacity(0.85), in: Capsule())
                 .shadow(radius: 6)
                 .padding(.bottom, 20)
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
