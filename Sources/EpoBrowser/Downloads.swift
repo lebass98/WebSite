@@ -56,6 +56,14 @@ final class DownloadLoader: ObservableObject {
     /// 영상 페이지에서 다운로드 링크를 모두 찾음
     static func findLinks(pageURL: String) async throws -> [DownloadLink] {
         guard let url = URL(string: pageURL) else { throw DownloadError("영상 주소가 이상해요.") }
+        // 빠른 길: 페이지 HTML만 받아서 링크를 읽음 (약 1초, 숨은 웹페이지는 광고까지 다 떠야 해서 5초 넘게 걸림)
+        if let html = try? await SiteScraper.html(url) {
+            let links = links(inHTML: html, base: url)
+            if !links.isEmpty {
+                DebugLog.write("다운로드 링크 \(links.count)개 (HTML): \(pageURL)")
+                return links
+            }
+        }
         let page = HeadlessPage()
         do {
             try await page.load(url)
@@ -79,6 +87,24 @@ final class DownloadLoader: ObservableObject {
                 : "다운로드 링크가 없어요. 로그인이 안 된 상태일 수 있어요.")
         }
         return links
+    }
+
+    /// HTML 글에서 다운로드 링크(a 태그)를 모음 — collectJS와 같은 기준
+    static func links(inHTML html: String, base: URL) -> [DownloadLink] {
+        guard let re = try? NSRegularExpression(
+            pattern: #"<a[^>]+href="([^"]*(?:/dload/|/download/)[^"]*)"[^>]*>(.*?)</a>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive])
+        else { return [] }
+        var seen = Set<String>()
+        return re.matches(in: html, range: NSRange(html.startIndex..., in: html)).compactMap { m in
+            guard let h = Range(m.range(at: 1), in: html), let t = Range(m.range(at: 2), in: html),
+                  let full = URL(string: SiteScraper.decode(String(html[h])), relativeTo: base)?.absoluteString,
+                  seen.insert(full).inserted
+            else { return nil }
+            let label = SiteScraper.decode(String(html[t]).replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression))
+                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            return DownloadLink(label: label.isEmpty ? full : label, url: full)
+        }
     }
 
     private static func collect(_ page: HeadlessPage) async throws -> [DownloadLink] {

@@ -694,8 +694,9 @@ struct SubtitleOverlay: View {
                     .font(.system(size: max(12, engine.fontSize * 0.5)))
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
+                    .shadow(color: .black, radius: 1)
+                    .shadow(color: .black, radius: 2)
                     .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 5))
             }
         }
         .padding(.horizontal, 40)
@@ -713,12 +714,14 @@ struct SubtitleOverlay: View {
             Text(line?.ko ?? " ")
                 .font(.system(size: engine.fontSize, weight: .bold))
                 .foregroundStyle(.white)
-                .shadow(color: .black, radius: 2)
                 .lineLimit(2)
         }
+        // 배경 없이도 밝은 화면에서 읽히게 글자에 검은 테두리 그림자
+        .shadow(color: .black, radius: 1)
+        .shadow(color: .black, radius: 2)
+        .shadow(color: .black.opacity(0.8), radius: 4)
         .multilineTextAlignment(.center)
         .padding(.horizontal, engine.fontSize * 0.5).padding(.vertical, engine.fontSize * 0.15)
-        .background(.black.opacity(line == nil ? 0 : 0.6), in: RoundedRectangle(cornerRadius: 8))
         .opacity(line == nil ? 0 : 1)
     }
 }
