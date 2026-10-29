@@ -13,12 +13,14 @@ struct SettingsView: View {
     @ObservedObject private var session = SiteSession.shared
     @ObservedObject private var backup = Backup.shared
     @ObservedObject private var appearance = AppearanceSetting.shared
+    @ObservedObject private var seek = SeekSetting.shared
+    @ObservedObject private var buffer = BufferSetting.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
             Section {
-                LibraryHeader(title: "설정", subtitle: "화면, 계정과 라이브러리 백업", icon: "gearshape")
+                LibraryHeader(title: "설정", subtitle: "화면, 재생, 계정과 라이브러리 백업", icon: "gearshape")
             }
             Section("화면") {
                 Picker("화면 모드", selection: $appearance.mode) {
@@ -26,6 +28,19 @@ struct SettingsView: View {
                         Label(mode.label, systemImage: mode.icon).tag(mode)
                     }
                 }
+            }
+            Section {
+                Picker("방향키로 옮길 시간", selection: $seek.seconds) {
+                    ForEach(SeekSetting.choices, id: \.self) { Text(SeekSetting.label($0)).tag($0) }
+                }
+                Picker("미리 받아 둘 시간", selection: $buffer.minutes) {
+                    ForEach(BufferSetting.choices, id: \.self) { Text("\($0)분").tag($0) }
+                }
+            } header: {
+                Text("재생")
+            } footer: {
+                Text("재생 창에서 ← → 키를 누르면 이만큼 뒤로·앞으로 옮겨요. 영상은 바로 재생하고, 재생하는 동안 앞쪽을 정한 시간만큼 미리 받아 둬요 (길게 할수록 끊김은 줄지만 메모리를 더 써요. 4K 10분이면 약 1~1.5GB). 다음에 여는 영상부터 적용돼요.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 TextField("아이디 또는 이메일", text: $form.username)

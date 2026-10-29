@@ -11,6 +11,9 @@ final class PlayerCenter: ObservableObject {
     @Published var videoSize: CGSize?
     /// 재생 창 (배율 바꾸기에 씀)
     weak var chrome: PlayerChrome?
+    /// 방향키로 앞뒤로 옮길 때 쓰는 플레이어 (앱 플레이어 또는 사이트 플레이어)
+    weak var player: AVPlayer?
+    weak var web: WKWebView?
 
     func play(_ item: PlayerItem) {
         if item != current { videoSize = nil }
@@ -36,6 +39,20 @@ final class PlayerCenter: ObservableObject {
             case .w1920: "가로 1920"
             case .quarter: "0.25배"
             }
+        }
+    }
+
+    /// 방향키: 설정한 초만큼 앞(+)·뒤(-)로
+    func seek(forward: Bool) {
+        let step = Double(SeekSetting.shared.seconds) * (forward ? 1 : -1)
+        if let player {
+            let now = player.currentTime().seconds
+            guard now.isFinite else { return }
+            var target = max(0, now + step)
+            if let length = player.currentItem?.duration.seconds, length.isFinite { target = min(target, length) }
+            player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        } else if let web {
+            web.evaluateJavaScript("(() => { const v = document.querySelector('video'); if (v) v.currentTime = Math.max(0, v.currentTime + \(step)); })()")
         }
     }
 
@@ -205,7 +222,7 @@ final class PlayerChrome: NSObject, ObservableObject {
         return false
     }
 
-    /// 숫자 키(수정 키 없이)로 배율 바꾸기, Esc로 재생 창 닫기 (재생 창이 선택돼 있고 글 입력 중이 아닐 때)
+    /// 숫자 키(수정 키 없이)로 배율 바꾸기, 방향키로 앞뒤로 옮기기, Esc로 재생 창 닫기 (재생 창이 선택돼 있고 글 입력 중이 아닐 때)
     private func handleKey(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
         let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -214,6 +231,11 @@ final class PlayerChrome: NSObject, ObservableObject {
         if event.keyCode == 53 {
             DebugLog.write("Esc → 재생 창 닫기")
             window.close()
+            return true
+        }
+        // 왼쪽·오른쪽 방향키(키 코드 123·124): 설정한 초만큼 뒤·앞으로
+        if event.keyCode == 123 || event.keyCode == 124 {
+            PlayerCenter.shared.seek(forward: event.keyCode == 124)
             return true
         }
         guard let key = event.charactersIgnoringModifiers,
@@ -619,6 +641,10 @@ final class PlayerLoader: ObservableObject {
     private var listenCache: AVURLAsset?
     private var statusObserver: NSKeyValueObservation?
     private var sizeObserver: NSKeyValueObservation?
+    private var bufferObserver: NSKeyValueObservation?
+
+    /// 처음엔 조금만 받아 두고 바로 재생, 재생이 시작되면 설정한 만큼 앞쪽을 미리 받아 둠 (초)
+    private static let startBuffer: TimeInterval = 2
 
     func start(_ item: PlayerItem) {
         guard task == nil else { return }
@@ -639,7 +665,19 @@ final class PlayerLoader: ObservableObject {
                 self.cookies = cookies
                 self.lowLink = links.min(by: { $0.height < $1.height }).flatMap { URL(string: $0.url) }
                 let asset = AVURLAsset(url: fileURL, options: [AVURLAssetHTTPCookiesKey: cookies])
-                let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+                let playerItem = AVPlayerItem(asset: asset)
+                playerItem.preferredForwardBufferDuration = Self.startBuffer
+                let player = AVPlayer(playerItem: playerItem)
+                bufferObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+                    guard player.timeControlStatus == .playing else { return }
+                    Task { @MainActor in
+                        guard let self, self.bufferObserver != nil else { return }
+                        let minutes = BufferSetting.shared.minutes
+                        player.currentItem?.preferredForwardBufferDuration = TimeInterval(minutes * 60)
+                        self.bufferObserver = nil
+                        DebugLog.write("재생 시작 → 미리 받기 \(minutes)분으로 늘림")
+                    }
+                }
                 watchForFailure(player, item: item)
                 // 영상 실제 해상도를 알게 되면 재생 창 배율에 씀
                 sizeObserver = player.currentItem?.observe(\.presentationSize, options: [.initial, .new]) { playerItem, _ in
@@ -648,6 +686,7 @@ final class PlayerLoader: ObservableObject {
                     Task { @MainActor in PlayerCenter.shared.videoSize = size }
                 }
                 mode = .native(player)
+                PlayerCenter.shared.player = player
                 subtitle = "\(best.qualityText) 재생"
                 player.play()
                 DebugLog.write("기본 플레이어로 재생: \(best.qualityText) \(fileURL)")
@@ -677,6 +716,7 @@ final class PlayerLoader: ObservableObject {
 
     private func useEmbed() {
         if case .native(let player) = mode { player.pause() }
+        PlayerCenter.shared.player = nil
         mode = .embed
         subtitle = "사이트 플레이어"
     }
@@ -696,7 +736,44 @@ final class PlayerLoader: ObservableObject {
         task = nil
         statusObserver = nil
         sizeObserver = nil
+        bufferObserver = nil
         if case .native(let player) = mode { player.pause() }
+    }
+}
+
+/// 재생 창에서 방향키를 누르면 앞뒤로 몇 초 옮길지 (5초 단위, 1분까지, 기본 20초)
+@MainActor
+final class SeekSetting: ObservableObject {
+    static let shared = SeekSetting()
+    static let choices = Array(stride(from: 5, through: 60, by: 5))
+    private static let key = "playerSeekSeconds"
+
+    @Published var seconds: Int {
+        didSet { UserDefaults.standard.set(seconds, forKey: Self.key) }
+    }
+
+    private init() {
+        let saved = UserDefaults.standard.integer(forKey: Self.key)
+        seconds = Self.choices.contains(saved) ? saved : 20
+    }
+
+    static func label(_ s: Int) -> String { s == 60 ? "1분" : "\(s)초" }
+}
+
+/// 재생이 시작된 뒤 앞쪽을 몇 분 미리 받아 둘지 (1분 단위, 2~10분, 기본 2분)
+@MainActor
+final class BufferSetting: ObservableObject {
+    static let shared = BufferSetting()
+    static let choices = Array(2...10)
+    private static let key = "playerBufferMinutes"
+
+    @Published var minutes: Int {
+        didSet { UserDefaults.standard.set(minutes, forKey: Self.key) }
+    }
+
+    private init() {
+        let saved = UserDefaults.standard.integer(forKey: Self.key)
+        minutes = Self.choices.contains(saved) ? saved : 2
     }
 }
 
@@ -846,6 +923,7 @@ struct EmbedWebView: NSViewRepresentable {
                 WKUserScript(source: Self.doubleClickJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
         let web = WKWebView(frame: .zero, configuration: config)
+        if autoplay { PlayerCenter.shared.web = web }  // 재생 창의 사이트 플레이어
         web.uiDelegate = context.coordinator
         web.navigationDelegate = context.coordinator
         context.coordinator.webView = web
