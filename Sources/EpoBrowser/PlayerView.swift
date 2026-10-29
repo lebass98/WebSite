@@ -987,7 +987,7 @@ struct BufferBar: View {
                         Rectangle().fill(EpoStyle.accent)
                             .frame(width: geo.size.width * progress.played)
                     }
-                    .frame(height: preview.ratio == nil ? 4 : 7)
+                    .frame(height: preview.ratio == nil ? 12 : 21)
                     .animation(reduceMotion ? nil : .spring(duration: 0.6, bounce: 0.3), value: progress.loaded)
                     .animation(.easeOut(duration: 0.15), value: preview.ratio == nil)
 
@@ -1010,12 +1010,12 @@ struct BufferBar: View {
                         .frame(width: 160)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .shadow(radius: 6)
-                        .offset(x: min(max(0, geo.size.width * ratio - 80), geo.size.width - 160), y: -14)
+                        .offset(x: min(max(0, geo.size.width * ratio - 80), geo.size.width - 160), y: -29)
                         .allowsHitTesting(false)
                         .transition(.opacity)
                     }
                 }
-                .frame(width: geo.size.width, height: 18, alignment: .bottomLeading)
+                .frame(width: geo.size.width, height: 30, alignment: .bottomLeading)
                 .contentShape(Rectangle())
                 .onContinuousHover { phase in
                     switch phase {
@@ -1034,7 +1034,7 @@ struct BufferBar: View {
                     player.seek(to: CMTime(seconds: ratio * length, preferredTimescale: 600))
                 }
             }
-            .frame(height: 18)
+            .frame(height: 30)
         }
         .opacity(progress.visible ? 1 : 0)
         .animation(.easeInOut(duration: 0.25), value: progress.visible)
