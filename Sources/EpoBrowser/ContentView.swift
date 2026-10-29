@@ -11,6 +11,7 @@ struct VideoListView: View {
     @ObservedObject private var thumbSize = ThumbnailSize.shared
     @ObservedObject private var filters = FilterStore.shared
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -69,17 +70,24 @@ struct VideoListView: View {
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.visibleVideos.isEmpty && (model.isLoading || model.videos.isEmpty && model.canLoadMore) {
-            ProgressView("불러오는 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 카드 모양 그대로 자리를 잡아 두고 빛이 지나감
+            ScrollView {
+                LazyVGrid(columns: thumbSize.columns, spacing: 18) {
+                    ForEach(0..<8, id: \.self) { _ in SkeletonCard() }
+                }
+                .padding(24)
+            }
+            .scrollDisabled(true)
         } else if model.visibleVideos.isEmpty, !model.localQuery.isEmpty {
             VStack(spacing: 12) {
-                LibraryEmptyState(icon: "magnifyingglass", title: "‘\(model.localQuery)’와 맞는 영상이 없어요",
+                LibraryEmptyState(icon: "magnifyingglass", title: "‘\(model.localQuery)’와 맞는 영상이 없어요", pop: true,
                                   message: "이 목록의 제목·키워드·올린 사람에서 찾았어요.")
                 Button("찾기 지우기") { model.localQuery = "" }.buttonStyle(.bordered)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.visibleVideos.isEmpty {
             VStack(spacing: 12) {
-                LibraryEmptyState(icon: "line.3.horizontal.decrease.circle", title: "조건에 맞는 영상이 없어요",
+                LibraryEmptyState(icon: "line.3.horizontal.decrease.circle", title: "조건에 맞는 영상이 없어요", pop: true,
                                   message: "세부 필터를 초기화하거나 다른 검색어로 다시 찾아보세요.")
                 Button("세부 필터 초기화") { FilterStore.shared.clear() }
                     .buttonStyle(.bordered)
@@ -93,7 +101,8 @@ struct VideoListView: View {
                         VideoCard(video: video, resolution: model.resolutions[video.id], isVR: model.isVR(video),
                                   onUploader: { name, path in
                                       onOpen(Route(title: "\(name) 업로드 영상", path: path + "uploaded-videos/"))
-                                  })
+                                  },
+                                  highlight: model.localQuery)
                             .onTapGesture { play(video) }
                             .accessibilityAction(named: Text("재생")) { play(video) }
                             .contextMenu { menu(for: video) }
@@ -101,9 +110,19 @@ struct VideoListView: View {
                                 // 끝에 가까워지면 다음 페이지 자동으로 불러오기
                                 if video.id == model.visibleVideos.last?.id { model.loadNextPage() }
                             }
+                            .transition(reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
+                    }
+                    // 다음 페이지를 받는 동안 그 자리에 스켈레톤 카드
+                    if model.isLoading {
+                        ForEach(0..<4, id: \.self) { i in SkeletonCard().id("skeleton\(i)") }
                     }
                 }
                 .padding(24)
+                // 찾기·정렬·크기를 바꾸면 카드가 새 자리로 스프링으로 이동
+                .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.25), value: model.localQuery)
+                .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.25), value: model.order)
+                .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.25), value: model.ascending)
+                .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.3), value: thumbSize.width)
 
                 footer
             }
@@ -113,7 +132,7 @@ struct VideoListView: View {
     @ViewBuilder private var footer: some View {
         Group {
             if model.isLoading {
-                ProgressView()
+                EmptyView()
             } else if let error = model.errorMessage {
                 VStack {
                     Text(error).font(.caption).foregroundStyle(.secondary)
@@ -259,6 +278,17 @@ struct FilterBar: View {
                     }
                 }
                 .fixedSize()
+                // 앱에서 정렬하는 목록(즐겨찾기 등)은 방향도 바꿀 수 있음
+                if !model.sortedBySite {
+                    Button {
+                        model.ascending.toggle()
+                    } label: {
+                        Label(model.ascending ? "오름차순" : "내림차순",
+                              systemImage: model.ascending ? "arrow.up" : "arrow.down")
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                    .help(model.ascending ? "지금 오름차순 · 누르면 내림차순" : "지금 내림차순 · 누르면 오름차순 (끝까지 불러와서 뒤집어요)")
+                }
             }
 
             if model.source == .browse {
@@ -308,15 +338,17 @@ struct VideoCard: View {
     let isVR: Bool
     /// 올린 사람 프로필 바로가기 (이름, /profile/이름/)
     var onUploader: (String, String) -> Void = { _, _ in }
+    /// 목록 안에서 찾는 글자 (제목에서 강조)
+    var highlight = ""
     @StateObject private var hover = HoverState()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var recent = RecentStore.shared
     @ObservedObject private var favorites = FavoritesStore.shared
     private var hovering: Bool { hover.inside }
     private var frame: Int { hover.frame }
-    private let timer = Timer.publish(every: 0.7, on: .main, in: .common).autoconnect()
 
     private var imageURL: URL? {
-        if hovering, !video.thumbs.isEmpty { return URL(string: video.thumbs[frame % video.thumbs.count]) }
+        if hovering, hover.scrubbed, !video.thumbs.isEmpty { return URL(string: video.thumbs[frame % video.thumbs.count]) }
         return URL(string: video.thumb)
     }
 
@@ -328,7 +360,14 @@ struct VideoCard: View {
                     .overlay {
                         AsyncImage(url: imageURL, transaction: .init(animation: nil)) { phase in
                             if let image = phase.image {
+                                // 처음 받은 썸네일은 흐릿한 상태에서 선명하게
                                 image.resizable().aspectRatio(contentMode: .fill)
+                                    .blur(radius: hover.loaded || reduceMotion ? 0 : 14)
+                                    .scaleEffect(hover.loaded || reduceMotion ? 1 : 1.08)
+                                    .onAppear {
+                                        guard !hover.loaded else { return }
+                                        withAnimation(.easeOut(duration: 0.6)) { hover.loaded = true }
+                                    }
                             } else if phase.error != nil {
                                 Image(systemName: "photo").foregroundStyle(.secondary)
                             }
@@ -338,6 +377,37 @@ struct VideoCard: View {
                         }
                     }
                     .clipped()
+                    // 마우스 가로 위치로 장면 고르기 (멈춰 있으면 미리보기 영상)
+                    .overlay {
+                        GeometryReader { geo in
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onContinuousHover { phase in
+                                    guard case .active(let p) = phase, !video.thumbs.isEmpty, geo.size.width > 0 else { return }
+                                    let ratio = min(0.999, max(0, p.x / geo.size.width))
+                                    let f = Int(ratio * Double(video.thumbs.count))
+                                    hover.ratio = ratio
+                                    if f != hover.frame || !hover.scrubbed {
+                                        hover.frame = f
+                                        hover.scrubbed = true
+                                        restartPreviewDelay()
+                                    }
+                                }
+                                .overlay(alignment: .bottomLeading) {
+                                    if hovering, hover.scrubbed, !hover.showVideo {
+                                        Rectangle().fill(EpoStyle.accent)
+                                            .frame(width: geo.size.width * hover.ratio, height: 3)
+                                    }
+                                }
+                        }
+                    }
+                    // 나중에 볼 영상에 넣으면 리본이 위에서 떨어짐
+                    .overlay(alignment: .topLeading) {
+                        if hover.ribbon {
+                            WatchLaterRibbon().padding(.leading, 10)
+                                .transition(.offset(y: -40).combined(with: .opacity))
+                        }
+                    }
 
                 HStack(spacing: 4) {
                     if recent.watchedIDs.contains(video.id) { badge("봤음", .gray) }
@@ -351,7 +421,7 @@ struct VideoCard: View {
 
                 // 즐겨찾기한 영상: 오른쪽 위에 큰 별
                 if favorites.isFavorite(video) {
-                    FavoriteStar(size: 28)
+                    FavoriteStar(size: 28, pop: hover.starPop)
                         .padding(6)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
@@ -366,7 +436,7 @@ struct VideoCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.tint, lineWidth: hovering ? 2 : 0))
 
-            Text(video.title)
+            Text(highlighted(video.title))
                 .font(.callout.weight(.medium))
                 .lineLimit(2, reservesSpace: true)
 
@@ -407,19 +477,47 @@ struct VideoCard: View {
         .onHover { inside in
             hover.inside = inside
             hover.frame = 0
+            hover.scrubbed = false
             hover.delayTask?.cancel()
-            if inside, video.previewURL != nil {
-                hover.delayTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    if !Task.isCancelled, hover.inside { hover.showVideo = true }
-                }
-            } else {
-                hover.showVideo = false
+            if inside { restartPreviewDelay() } else { hover.showVideo = false }
+        }
+        // 즐겨찾기에 들어오는 순간 별이 튀고 불꽃이 퍼짐
+        .onChange(of: favorites.isFavorite(video)) { _, now in
+            if now { hover.starPop += 1 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .watchLaterAdded)) { note in
+            guard video.fid > 0, (note.object as? Int) == video.fid else { return }
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.6, bounce: 0.45)) { hover.ribbon = true }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                withAnimation(.easeIn(duration: 0.3)) { hover.ribbon = false }
             }
         }
-        // 미리보기 영상이 없는 영상은 예전처럼 장면 사진이 넘어감
-        .onReceive(timer) { _ in if hover.inside, video.previewURL == nil { hover.frame += 1 } }
         .help(video.title)
+    }
+
+    /// 마우스를 움직이는 동안은 장면 사진, 0.6초 멈추면 미리보기 영상
+    private func restartPreviewDelay() {
+        hover.delayTask?.cancel()
+        hover.showVideo = false
+        guard video.previewURL != nil else { return }
+        hover.delayTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if !Task.isCancelled, hover.inside { hover.showVideo = true }
+        }
+    }
+
+    private func highlighted(_ title: String) -> AttributedString {
+        var out = AttributedString(title)
+        for word in highlight.split(whereSeparator: \.isWhitespace) {
+            var start = out.startIndex
+            while let r = out[start...].range(of: String(word), options: [.caseInsensitive, .diacriticInsensitive]) {
+                out[r].foregroundColor = EpoStyle.accent
+                out[r].backgroundColor = EpoStyle.accent.opacity(0.12)
+                start = r.upperBound
+            }
+        }
+        return out
     }
 
     private func badge(_ text: String, _ color: Color) -> some View {
@@ -428,6 +526,35 @@ struct VideoCard: View {
             .padding(.horizontal, 5).padding(.vertical, 2)
             .background(color, in: RoundedRectangle(cornerRadius: 4))
             .foregroundStyle(.white)
+    }
+}
+
+/// 불러오는 동안 보여 주는 카드 모양 자리 (빛이 한 번씩 지나감)
+struct SkeletonCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 8).fill(.quaternary).aspectRatio(16 / 9, contentMode: .fit)
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary).frame(height: 12)
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary).frame(width: 120, height: 10)
+        }
+        .padding(10)
+        .background(EpoStyle.surface, in: RoundedRectangle(cornerRadius: EpoStyle.radius))
+        .overlay {
+            if !reduceMotion {
+                TimelineView(.animation) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                    GeometryReader { geo in
+                        LinearGradient(colors: [.clear, .white.opacity(0.18), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: geo.size.width * 0.6)
+                            .offset(x: (t * 1.6 - 0.6) * geo.size.width)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: EpoStyle.radius))
+                .allowsHitTesting(false)
+            }
+        }
     }
 }
 
@@ -473,6 +600,13 @@ final class SheetState: ObservableObject {
 final class HoverState: ObservableObject {
     @Published var inside = false
     @Published var frame = 0
+    /// 썸네일 위 마우스 가로 위치 (0~1)
+    @Published var ratio: Double = 0
+    /// 마우스를 움직여 장면을 고른 적이 있는지 (아니면 대표 썸네일)
+    @Published var scrubbed = false
+    @Published var loaded = false
+    @Published var starPop = 0
+    @Published var ribbon = false
     /// 마우스를 잠깐 올려 두면 미리보기 영상을 켬 (스쳐 지나갈 때는 안 받음)
     @Published var showVideo = false
     var delayTask: Task<Void, Never>?

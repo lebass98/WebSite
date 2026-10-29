@@ -13,6 +13,8 @@ struct SidebarView: View {
     @ObservedObject private var filters = FilterStore.shared
     @ObservedObject private var session = SiteSession.shared
     @StateObject private var expand = CategoryExpand()
+    @Namespace private var menuSpace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // 사이드바 칸에서는 ScrollView 안 버튼이 실제 마우스 클릭을 못 받아서 기본 사이드바 목록(List)으로 만듦
@@ -108,6 +110,8 @@ struct SidebarView: View {
                                     Text("카테고리 고르기").bold()
                                     Text("\(filters.draft.categories.count)개 선택 (최대 \(VideoFilters.maxCategories)개)")
                                         .font(.caption).foregroundStyle(.secondary)
+                                        .contentTransition(.numericText())
+                                        .animation(.spring(duration: 0.35), value: filters.draft.categories.count)
                                 }
                                 Spacer()
                                 Image(systemName: expand.open ? "chevron.up" : "chevron.down")
@@ -137,6 +141,9 @@ struct SidebarView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .disabled(!on && filters.draft.categories.count >= VideoFilters.maxCategories)
+                                    // 5개가 차면 나머지는 흐리게
+                                    .opacity(!on && filters.draft.categories.count >= VideoFilters.maxCategories ? 0.35 : 1)
+                                    .animation(.easeOut(duration: 0.25), value: filters.draft.categories.count)
                                 }
                             }
                             }
@@ -177,6 +184,8 @@ struct SidebarView: View {
             .padding(.vertical, 6)
         }
         .listStyle(.sidebar)
+        .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.25), value: nav.section)
+        .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.25), value: nav.searchType)
     }
 
     private var isSearchSection: Bool {
@@ -208,7 +217,13 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .foregroundStyle(selected ? EpoStyle.accent : Color.primary)
-            .background(selected ? EpoStyle.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            // 선택 표시 하나가 메뉴 사이를 스프링으로 미끄러져 이동
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 6).fill(EpoStyle.accent.opacity(0.12))
+                        .matchedGeometryEffect(id: "menuSelection", in: menuSpace)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -234,6 +249,9 @@ struct RangeSlider: View {
     let range: ClosedRange<Int>
     var accessibilityTitle = "길이"
     var accessibilityUnit = "분"
+    /// 말풍선 글자 (기본: "n분", 끝값은 "1h+")
+    var label: (Int) -> String = { $0 >= VideoFilters.openMax ? "1h+" : "\($0)분" }
+    @StateObject private var grab = KnobGrab()
 
     var body: some View {
         GeometryReader { geo in
@@ -248,7 +266,7 @@ struct RangeSlider: View {
                 Capsule().fill(EpoStyle.accent)
                     .frame(width: max(0, x(high) - x(low)), height: 4)
                     .offset(x: x(low))
-                knob.position(x: x(low), y: geo.size.height / 2)
+                knob(0, low).position(x: x(low), y: geo.size.height / 2)
                     .accessibilityLabel("최소 \(accessibilityTitle)")
                     .accessibilityValue("\(low) \(accessibilityUnit)")
                     .accessibilityAdjustableAction { direction in
@@ -259,9 +277,10 @@ struct RangeSlider: View {
                         }
                     }
                     .gesture(DragGesture().onChanged { g in
+                        grab.index = 0
                         low = min(max(value(g.location.x), range.lowerBound), high)
-                    })
-                knob.position(x: x(high), y: geo.size.height / 2)
+                    }.onEnded { _ in grab.index = nil })
+                knob(1, high).position(x: x(high), y: geo.size.height / 2)
                     .accessibilityLabel("최대 \(accessibilityTitle)")
                     .accessibilityValue("\(high) \(accessibilityUnit)")
                     .accessibilityAdjustableAction { direction in
@@ -272,16 +291,37 @@ struct RangeSlider: View {
                         }
                     }
                     .gesture(DragGesture().onChanged { g in
+                        grab.index = 1
                         high = max(min(value(g.location.x), range.upperBound), low)
-                    })
+                    }.onEnded { _ in grab.index = nil })
             }
         }
     }
 
-    private var knob: some View {
-        Circle().fill(.white)
+    /// 잡으면 손잡이가 커지고 위에 값 말풍선이 따라다님
+    private func knob(_ index: Int, _ value: Int) -> some View {
+        let held = grab.index == index
+        return Circle().fill(.white)
             .overlay(Circle().strokeBorder(EpoStyle.accent, lineWidth: 3))
             .frame(width: 18, height: 18)
             .shadow(radius: 1)
+            .scaleEffect(held ? 1.3 : 1)
+            .overlay(alignment: .top) {
+                Text(label(value))
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color.primary, in: RoundedRectangle(cornerRadius: 5))
+                    .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                    .fixedSize()
+                    .offset(y: held ? -24 : -16)
+                    .scaleEffect(held ? 1 : 0.6, anchor: .bottom)
+                    .opacity(held ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .animation(.spring(duration: 0.35, bounce: 0.4), value: held)
     }
+}
+
+final class KnobGrab: ObservableObject {
+    @Published var index: Int?
 }

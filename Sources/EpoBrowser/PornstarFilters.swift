@@ -189,7 +189,8 @@ struct PornstarFilterBar: View {
                 Text("\(valueText(r.low, edge: r.low == r.bounds.lowerBound ? "≤ " : "", unitless: unitless)) ~ \(valueText(r.high, edge: r.high == r.bounds.upperBound ? "≥ " : "", unitless: unitless))")
                     .font(.caption.monospacedDigit())
             }
-            RangeSlider(low: range.low, high: range.high, range: r.bounds, accessibilityTitle: title, accessibilityUnit: unitless ? "" : (store.draft.inches ? "센티미터, 인치로 표시" : "센티미터"))
+            RangeSlider(low: range.low, high: range.high, range: r.bounds, accessibilityTitle: title, accessibilityUnit: unitless ? "" : (store.draft.inches ? "센티미터, 인치로 표시" : "센티미터"),
+                        label: { valueText($0, edge: "", unitless: unitless) })
                 .frame(height: 20)
         }
     }

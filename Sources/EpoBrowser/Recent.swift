@@ -109,6 +109,9 @@ struct RecentListView: View {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(store.items) { item in
                             RecentRow(item: item)
+                                // 방금 본 영상이 맨 위로 끼어들고 나머지는 밀려 내려감
+                                .transition(.asymmetric(insertion: .offset(y: -14).combined(with: .scale(scale: 0.92)).combined(with: .opacity),
+                                                        removal: .opacity))
                                 .onTapGesture {
                                     store.add(item)
                                     openWindow.play(item.playerItem)
@@ -126,6 +129,7 @@ struct RecentListView: View {
                                 }
                         }
                     }
+                    .animation(.spring(duration: 0.5, bounce: 0.3), value: store.items.map(\.id))
                 }
                 .frame(height: 360)
             }

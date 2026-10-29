@@ -14,6 +14,10 @@ final class PlayerCenter: ObservableObject {
     /// 방향키로 앞뒤로 옮길 때 쓰는 플레이어 (앱 플레이어 또는 사이트 플레이어)
     weak var player: AVPlayer?
     weak var web: WKWebView?
+    /// 화면 가운데 "+20초" 알약 (연달아 누르면 더해짐)
+    @Published private(set) var seekTotal = 0
+    @Published private(set) var seekShown = false
+    private var seekHide: Task<Void, Never>?
 
     func play(_ item: PlayerItem) {
         if item != current { videoSize = nil }
@@ -45,6 +49,15 @@ final class PlayerCenter: ObservableObject {
     /// 방향키: 설정한 초만큼 앞(+)·뒤(-)로
     func seek(forward: Bool) {
         let step = Double(SeekSetting.shared.seconds) * (forward ? 1 : -1)
+        let amount = Int(step)
+        seekTotal = seekShown && (seekTotal > 0) == forward ? seekTotal + amount : amount
+        seekShown = true
+        seekHide?.cancel()
+        seekHide = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            self?.seekShown = false
+        }
         if let player {
             let now = player.currentTime().seconds
             guard now.isFinite else { return }
@@ -611,21 +624,44 @@ struct PlayerView: View {
     @ViewBuilder private var content: some View {
         switch loader.mode {
         case .finding:
-            VStack(spacing: 10) {
-                ProgressView().controlSize(.large)
-                Text("최고 화질로 연결하고 있어요").font(.headline).foregroundStyle(.white)
+            VStack(spacing: 14) {
+                // 첫 재생까지의 단계를 차례로 ✓
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(0..<PlayerLoader.stepCount, id: \.self) { i in
+                        HStack(spacing: 10) {
+                            Group {
+                                if i < loader.step {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(EpoStyle.accent)
+                                        .transition(.scale(scale: 0.3).combined(with: .opacity))
+                                } else if i == loader.step {
+                                    ProgressView().controlSize(.small).tint(.white)
+                                } else {
+                                    Image(systemName: "circle").foregroundStyle(.white.opacity(0.4))
+                                }
+                            }
+                            .frame(width: 18, height: 18)
+                            Text(loader.stepLabel(i)).foregroundStyle(.white)
+                        }
+                        .opacity(i <= loader.step ? 1 : 0.45)
+                    }
+                }
+                .font(.callout)
+                .animation(.spring(duration: 0.4, bounce: 0.4), value: loader.step)
                 Text("연결이 어려우면 사이트 플레이어로 전환됩니다.")
                     .font(.caption).foregroundStyle(.white.opacity(0.65))
                 Button("사이트 플레이어로 열기") { loader.stop(); loader.showSitePlayer() }
                     .buttonStyle(.bordered).tint(.white)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay { SeekPill() }
         case .native(let player):
             NativePlayerView(player: player)
                 .overlay { SubtitleOverlay(engine: subtitles) }
                 .overlay(alignment: .bottom) { BufferBar(player: player) }
+                .overlay { SeekPill() }
         case .embed:
             EmbedWebView(url: URL(string: item.embed)!, autoplay: true)
+                .overlay { SeekPill() }
         }
     }
 }
@@ -636,6 +672,18 @@ final class PlayerLoader: ObservableObject {
 
     @Published private(set) var mode = Mode.finding
     @Published private(set) var subtitle = ""
+    /// 첫 재생 준비 단계 (0 주소 찾기, 1 최고 화질 확인, 2 재생 준비)
+    @Published private(set) var step = 0
+    private var bestQuality = ""
+    static let stepCount = 3
+
+    func stepLabel(_ i: Int) -> String {
+        switch i {
+        case 0: "다운로드 주소 찾기"
+        case 1: bestQuality.isEmpty ? "최고 화질 확인" : "최고 화질 확인 (\(bestQuality))"
+        default: "재생 준비"
+        }
+    }
     private var task: Task<Void, Never>?
     /// 자막 미리 듣기용: 가장 낮은 화질 주소 (소리는 화질과 상관없이 같아서 데이터를 아낌)
     private var lowLink: URL?
@@ -652,6 +700,8 @@ final class PlayerLoader: ObservableObject {
         guard task == nil else { return }
         mode = .finding
         subtitle = "연결 중"
+        step = 0
+        bestQuality = ""
         lowLink = nil
         listenCache = nil
         task = Task {
@@ -660,9 +710,12 @@ final class PlayerLoader: ObservableObject {
                 guard let best = links.max(by: { $0.height < $1.height }), let link = URL(string: best.url) else {
                     throw DownloadError("링크 없음")
                 }
+                bestQuality = best.qualityText
+                step = 1
                 // 다운로드 링크는 실제 파일로 넘겨 주는 주소라서 끝 주소를 먼저 알아냄
                 let fileURL = (try? await DownloadLoader.resolve(link)) ?? link
                 guard !Task.isCancelled else { return }
+                step = 2
                 let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
                 self.cookies = cookies
                 self.lowLink = links.min(by: { $0.height < $1.height }).flatMap { URL(string: $0.url) }
@@ -835,8 +888,14 @@ final class BufferProgress: ObservableObject {
     @Published private(set) var played: Double = 0      // 0~1
     @Published private(set) var loaded: [ClosedRange<Double>] = []  // 0~1
     @Published private(set) var ahead: Double = 0       // 지금 위치부터 받아 둔 초
+    /// 받아 둔 범위가 늘어나는 중인지 (사선 무늬)
+    @Published private(set) var busy = false
     /// 마우스를 움직이면 잠깐 보임 (재생 조절 막대와 같이)
     @Published private(set) var visible = false
+    /// 막대 위에 마우스가 있으면 숨기지 않음
+    var hovering = false { didSet { if hovering { show() } } }
+    private var lastEnd: Double = 0
+    private var lastGrowth = Date.distantPast
     private var timer: Timer?
     private var monitor: Any?
     private var hideTask: Task<Void, Never>?
@@ -867,8 +926,8 @@ final class BufferProgress: ObservableObject {
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(ControlsAutoHide.delay))
-            guard !Task.isCancelled else { return }
-            self?.visible = false
+            guard !Task.isCancelled, let self else { return }
+            if self.hovering { self.show() } else { self.visible = false }
         }
     }
 
@@ -887,41 +946,99 @@ final class BufferProgress: ObservableObject {
             ranges.append(max(0, start / length)...min(1, end / length))
             if start <= now + 1, end > now { aheadSeconds = end - now }
         }
+        let end = now + aheadSeconds
+        if end > lastEnd + 0.2 { lastGrowth = Date() }
+        lastEnd = end
+        busy = Date().timeIntervalSince(lastGrowth) < 1.5
         loaded = ranges
         ahead = aheadSeconds
     }
 }
 
-/// 영상 맨 아래 얇은 막대: 밝은 회색 = 미리 받아 둔 부분, 강조색 = 본 부분
+/// 영상 맨 아래 막대: 밝은 회색 = 미리 받아 둔 부분 (받는 중엔 사선 무늬), 강조색 = 본 부분
+/// 막대에 마우스를 올리면 그 시점 장면을 미리 보여 주고, 누르면 그곳으로 이동
 struct BufferBar: View {
     let player: AVPlayer
     @StateObject private var progress = BufferProgress()
+    @StateObject private var preview = PreviewFrames()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            Text("미리 받음 \(Self.time(progress.ahead))")
+            Text("\(progress.busy ? "받는 중 · " : "")미리 받음 \(Self.time(progress.ahead))")
                 .font(.caption2.monospacedDigit())
+                .contentTransition(.numericText())
+                .animation(.spring(duration: 0.4), value: Int(progress.ahead))
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.black.opacity(0.55), in: Capsule())
                 .foregroundStyle(.white)
                 .padding(.trailing, 8)
             GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(.white.opacity(0.15))
-                    ForEach(Array(progress.loaded.enumerated()), id: \.offset) { _, r in
-                        Rectangle().fill(.white.opacity(0.5))
-                            .frame(width: geo.size.width * (r.upperBound - r.lowerBound))
-                            .offset(x: geo.size.width * r.lowerBound)
+                ZStack(alignment: .bottomLeading) {
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(.white.opacity(0.15))
+                        ForEach(Array(progress.loaded.enumerated()), id: \.offset) { _, r in
+                            Rectangle().fill(.white.opacity(0.5))
+                                .overlay { if progress.busy && !reduceMotion { Stripes() } }
+                                .clipped()
+                                .frame(width: geo.size.width * (r.upperBound - r.lowerBound))
+                                .offset(x: geo.size.width * r.lowerBound)
+                        }
+                        Rectangle().fill(EpoStyle.accent)
+                            .frame(width: geo.size.width * progress.played)
                     }
-                    Rectangle().fill(EpoStyle.accent)
-                        .frame(width: geo.size.width * progress.played)
+                    .frame(height: preview.ratio == nil ? 4 : 7)
+                    .animation(reduceMotion ? nil : .spring(duration: 0.6, bounce: 0.3), value: progress.loaded)
+                    .animation(.easeOut(duration: 0.15), value: preview.ratio == nil)
+
+                    // 장면 미리보기
+                    if let ratio = preview.ratio {
+                        VStack(spacing: 0) {
+                            Group {
+                                if let image = preview.image {
+                                    Image(nsImage: image).resizable().aspectRatio(16 / 9, contentMode: .fill)
+                                } else {
+                                    Color.black
+                                }
+                            }
+                            .frame(width: 160, height: 90).clipped()
+                            Text(Self.clock(preview.seconds))
+                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .frame(maxWidth: .infinity).padding(.vertical, 2)
+                                .background(.black).foregroundStyle(.white)
+                        }
+                        .frame(width: 160)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .shadow(radius: 6)
+                        .offset(x: min(max(0, geo.size.width * ratio - 80), geo.size.width - 160), y: -14)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                    }
+                }
+                .frame(width: geo.size.width, height: 18, alignment: .bottomLeading)
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p):
+                        progress.hovering = true
+                        preview.hover(ratio: min(1, max(0, p.x / geo.size.width)), player: player)
+                    case .ended:
+                        progress.hovering = false
+                        preview.ratio = nil
+                    }
+                }
+                .onTapGesture { location in
+                    let ratio = min(1, max(0, location.x / geo.size.width))
+                    let length = player.currentItem?.duration.seconds ?? 0
+                    guard length.isFinite, length > 0 else { return }
+                    player.seek(to: CMTime(seconds: ratio * length, preferredTimescale: 600))
                 }
             }
-            .frame(height: 4)
+            .frame(height: 18)
         }
         .opacity(progress.visible ? 1 : 0)
         .animation(.easeInOut(duration: 0.25), value: progress.visible)
-        .allowsHitTesting(false)
+        .allowsHitTesting(progress.visible)
         .onAppear { progress.start(player) }
         .onDisappear { progress.stop() }
     }
@@ -929,6 +1046,101 @@ struct BufferBar: View {
     private static func time(_ s: Double) -> String {
         let t = Int(s.rounded())
         return t >= 60 ? "\(t / 60)분 \(t % 60)초" : "\(t)초"
+    }
+
+    private static func clock(_ s: Double) -> String {
+        let t = Int(s)
+        return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
+    }
+}
+
+/// 받는 중에 흐르는 사선 무늬
+struct Stripes: View {
+    var body: some View {
+        TimelineView(.animation) { context in
+            let shift = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.6) / 0.6 * 12
+            Canvas { ctx, size in
+                var x = -size.height + shift - 12
+                while x < size.width {
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: size.height))
+                    path.addLine(to: CGPoint(x: x + size.height, y: 0))
+                    path.addLine(to: CGPoint(x: x + size.height + 6, y: 0))
+                    path.addLine(to: CGPoint(x: x + 6, y: size.height))
+                    ctx.fill(path, with: .color(.white.opacity(0.45)))
+                    x += 12
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// 막대 위 장면 미리보기 (가까운 키프레임으로 빨리 뽑고, 앞 요청이 끝나야 다음 요청)
+@MainActor
+final class PreviewFrames: ObservableObject {
+    @Published var ratio: Double?
+    @Published private(set) var seconds: Double = 0
+    @Published private(set) var image: NSImage?
+    private var generator: AVAssetImageGenerator?
+    private var working = false
+    private var wanted: Double?
+    private var lastDone: Double = -100
+
+    func hover(ratio: Double, player: AVPlayer) {
+        guard let item = player.currentItem else { return }
+        let length = item.duration.seconds
+        guard length.isFinite, length > 0 else { return }
+        self.ratio = ratio
+        seconds = ratio * length
+        if generator == nil {
+            let g = AVAssetImageGenerator(asset: item.asset)
+            g.maximumSize = CGSize(width: 320, height: 180)
+            g.appliesPreferredTrackTransform = true
+            g.requestedTimeToleranceBefore = CMTime(seconds: 3, preferredTimescale: 600)
+            g.requestedTimeToleranceAfter = CMTime(seconds: 3, preferredTimescale: 600)
+            generator = g
+        }
+        wanted = seconds
+        pump()
+    }
+
+    private func pump() {
+        guard !working, let target = wanted, let generator, abs(target - lastDone) > 1.5 else { return }
+        working = true
+        wanted = nil
+        Task {
+            let result = try? await generator.image(at: CMTime(seconds: target, preferredTimescale: 600))
+            if let cg = result?.image { image = NSImage(cgImage: cg, size: .zero) }
+            lastDone = target
+            working = false
+            pump()
+        }
+    }
+}
+
+/// 화면 가운데 "+20초" 알약 (← → 키)
+struct SeekPill: View {
+    @ObservedObject private var center = PlayerCenter.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if center.seekShown {
+                Label("\(center.seekTotal > 0 ? "+" : "−")\(abs(center.seekTotal))초",
+                      systemImage: center.seekTotal > 0 ? "goforward" : "gobackward")
+                    .font(.title2.weight(.bold).monospacedDigit())
+                    .contentTransition(.numericText())
+                    .padding(.horizontal, 22).padding(.vertical, 12)
+                    .background(.ultraThinMaterial.opacity(0.9), in: Capsule())
+                    .environment(\.colorScheme, .dark)
+                    .foregroundStyle(.white)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.7).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.35, bounce: 0.45), value: center.seekShown)
+        .animation(.spring(duration: 0.3), value: center.seekTotal)
+        .allowsHitTesting(false)
     }
 }
 

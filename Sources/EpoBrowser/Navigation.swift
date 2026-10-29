@@ -85,11 +85,17 @@ final class NavState: ObservableObject {
         activeTabID = tab.id
     }
 
-    /// 탭 닫기 (보고 있던 탭이면 옆 탭으로)
+    /// 탭 닫기 (보고 있던 탭이면 옆 탭으로). 알림의 "되돌리기"로 다시 열 수 있음
     func close(_ tab: Tab) {
         guard tabs.count > 1, let i = tabs.firstIndex(of: tab) else { return }
+        let wasActive = activeTabID == tab.id
         tabs.remove(at: i)
-        if activeTabID == tab.id { select(tabs[min(i, tabs.count - 1)]) }
+        if wasActive { select(tabs[min(i, tabs.count - 1)]) }
+        Toast.shared.show("‘\(tab.title)’ 탭을 닫았어요", seconds: 5, action: (title: "되돌리기", run: { [weak self] in
+            guard let self, !self.tabs.contains(tab) else { return }
+            self.tabs.insert(tab, at: min(i, self.tabs.count))
+            if wasActive { self.select(tab) }
+        }))
     }
 
     /// 검색어와 검색 종류에 맞는 화면으로

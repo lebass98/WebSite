@@ -56,13 +56,61 @@ final class AppearanceSetting: ObservableObject {
     }
 }
 
+/// 화면 모드를 바꿀 때 누른 자리에서 원이 퍼지며 새 모드가 드러남
+/// (바꾸기 전 창 모습을 덮어 두고, 그 덮개에 원형 구멍을 키움)
+@MainActor
+enum ThemeReveal {
+    static func run(_ change: () -> Void) {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let window = NSApp.keyWindow,
+              let host = window.contentView?.superview ?? window.contentView,
+              let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            change()
+            return
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let image = NSImage(size: host.bounds.size)
+        image.addRepresentation(rep)
+        let cover = NSImageView(frame: host.bounds)
+        cover.image = image
+        cover.imageScaling = .scaleAxesIndependently
+        cover.wantsLayer = true
+        host.addSubview(cover, positioned: .above, relativeTo: nil)
+        change()
+
+        let center = cover.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let b = cover.bounds
+        let radius = hypot(max(center.x, b.width - center.x), max(center.y, b.height - center.y))
+        func path(_ r: CGFloat) -> CGPath {
+            let p = CGMutablePath()
+            p.addRect(b)
+            p.addEllipse(in: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
+            return p
+        }
+        let mask = CAShapeLayer()
+        mask.frame = b
+        mask.fillRule = .evenOdd
+        mask.path = path(radius)
+        cover.layer?.mask = mask
+        let grow = CABasicAnimation(keyPath: "path")
+        grow.fromValue = path(1)
+        grow.toValue = path(radius)
+        grow.duration = 0.55
+        grow.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { cover.removeFromSuperview() }
+        mask.add(grow, forKey: "reveal")
+        CATransaction.commit()
+    }
+}
+
 /// 툴바 오른쪽의 화면 모드 버튼
 struct AppearanceButton: View {
     @ObservedObject var setting = AppearanceSetting.shared
 
     var body: some View {
         Button {
-            setting.mode = setting.mode.next
+            ThemeReveal.run { setting.mode = setting.mode.next }
         } label: {
             Label(setting.mode.label, systemImage: setting.mode.icon)
         }

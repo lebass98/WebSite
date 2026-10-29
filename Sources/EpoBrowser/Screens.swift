@@ -205,9 +205,12 @@ struct CollectionView: View {
                             tile(item)
                                 .onTapGesture { onOpen(Route(title: item.title, path: item.path)) }
                                 .onAppear { if item.id == model.visibleItems.last?.id { model.loadNextPage() } }
+                                .transition(.scale(scale: 0.9).combined(with: .opacity))
                         }
                     }
                     .padding(16)
+                    .animation(.spring(duration: 0.5, bounce: 0.25), value: model.localQuery)
+                    .animation(.spring(duration: 0.5, bounce: 0.25), value: model.playlistSort)
                     if model.isLoading {
                         ProgressView().padding(.bottom, 20)
                     } else if let error = model.errorMessage {

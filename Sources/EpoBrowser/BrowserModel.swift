@@ -19,6 +19,8 @@ final class BrowserModel: ObservableObject {
     @Published var gay = Inclusion.exclude { didSet { if gay != oldValue { reload() } } }
     /// 이 목록 안에서 찾기 (제목·키워드·올린 사람). 찾는 동안 뒤 페이지도 이어서 불러옴
     @Published var localQuery = "" { didSet { if localQuery != oldValue { continueSearch() } } }
+    /// 오름차순 (앱에서 정렬하는 목록만). 뒤집으려면 끝까지 받아야 해서 켜면 뒤 페이지도 이어서 불러옴
+    @Published var ascending = false { didSet { if ascending != oldValue { continueSearch() } } }
 
     @Published private(set) var videos: [Video] = []
     /// 영상별 화질 (세로 픽셀, 0 = 모름)
@@ -66,7 +68,9 @@ final class BrowserModel: ObservableObject {
                 return h == 0 || h >= f.quality.minHeight
             }
         }
-        return sortedBySite ? filtered : sortedLocally(filtered)
+        if sortedBySite { return filtered }
+        let sorted = sortedLocally(filtered)
+        return ascending ? sorted.reversed() : sorted
     }
 
     func isVR(_ video: Video) -> Bool {
@@ -168,7 +172,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// 목록 안에서 찾는 중이면 끝(또는 최대 페이지)까지 이어서 불러옴
-    var isSearching: Bool { !localQuery.isEmpty && hasMore && page < ListSearch.maxPages }
+    var isSearching: Bool { (!localQuery.isEmpty || (ascending && !sortedBySite)) && hasMore && page < ListSearch.maxPages }
 
     private func continueSearch() {
         // 지금 불러오는 작업이 끝난 뒤에 다음 페이지로

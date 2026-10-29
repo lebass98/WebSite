@@ -26,10 +26,21 @@ struct RootView: View {
                             .safeAreaInset(edge: .top, spacing: 0) { tabBar }
                     }
             }
-            .overlay(alignment: .bottom) { ToastView().animation(.spring(duration: 0.3), value: Toast.shared.message) }
+            .overlay(alignment: .bottom) { ToastView() }
         }
         .navigationSplitViewStyle(.balanced)
         .searchable(text: $search.text, placement: .toolbar, prompt: "영상·스타·플레이리스트 검색")
+        // 입력하는 동안 맞는 카테고리를 추천 (맞는 글자는 강조색)
+        .searchSuggestions {
+            ForEach(categorySuggestions) { cat in
+                Button {
+                    search.text = ""
+                    nav.open(Route(title: cat.name, path: cat.path))
+                } label: {
+                    Label { Text(highlighted(cat.name)) } icon: { Image(systemName: "square.grid.2x2") }
+                }
+            }
+        }
         .onSubmit(of: .search) {
             filters.search(search.text)
             nav.showSearchResults()
@@ -81,6 +92,22 @@ struct RootView: View {
         }
     }
 
+    private var categorySuggestions: [SiteCategory] {
+        let text = search.text.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, text != filters.searchText else { return [] }
+        return Array(SiteCategory.sorted.filter { $0.name.localizedStandardContains(text) || $0.slug.localizedStandardContains(text) }.prefix(6))
+    }
+
+    private func highlighted(_ name: String) -> AttributedString {
+        var out = AttributedString(name)
+        let text = search.text.trimmingCharacters(in: .whitespaces)
+        if let r = out.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) {
+            out[r].foregroundColor = EpoStyle.accent
+            out[r].font = .body.bold()
+        }
+        return out
+    }
+
     private var tabBar: some View {
         VStack(spacing: 0) {
             TabStrip(nav: nav)
@@ -117,6 +144,8 @@ struct RootView: View {
 /// 목록 위쪽 탭 줄 (이동한 페이지가 쌓임)
 struct TabStrip: View {
     @ObservedObject var nav: NavState
+    @Namespace private var tabSpace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -147,12 +176,25 @@ struct TabStrip: View {
                         }
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .foregroundStyle(active ? EpoStyle.accent : Color.primary)
-                        .background(active ? EpoStyle.accent.opacity(0.12) : Color.primary.opacity(0.04), in: Capsule())
+                        // 선택 캡슐 하나가 탭 사이를 스프링으로 미끄러져 이동
+                        .background {
+                            if active {
+                                Capsule().fill(EpoStyle.accent.opacity(0.12))
+                                    .matchedGeometryEffect(id: "activeTab", in: tabSpace)
+                            } else {
+                                Capsule().fill(Color.primary.opacity(0.04))
+                            }
+                        }
                         .contentShape(Capsule())
                         .help(tab.title)
                         .id(tab.id)
+                        .transition(reduceMotion ? .opacity : .asymmetric(
+                            insertion: .scale(scale: 0.8).combined(with: .opacity),
+                            removal: .offset(y: 24).combined(with: .opacity)))
                     }
                 }
+                .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.3), value: nav.activeTabID)
+                .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.2), value: nav.tabs.map(\.id))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
             }

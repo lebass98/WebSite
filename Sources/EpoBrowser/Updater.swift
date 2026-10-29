@@ -107,6 +107,8 @@ struct UpdateButton: View {
             } label: {
                 Label("업데이트 \(info.version)", systemImage: "arrow.down.app.fill")
                     .labelStyle(.titleAndIcon)
+                    // 새 버전이 생기면 아이콘이 두 번 튐
+                    .symbolEffect(.bounce.up, options: .repeat(2), value: info.build)
             }
             .tint(.accentColor)
             .buttonStyle(.borderedProminent)

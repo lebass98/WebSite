@@ -82,6 +82,9 @@ final class SiteActions: ObservableObject {
             let ok = await send(["type": "video", "fid": String(fid), "list": list.key, "action": add ? "add" : "remove"])
             if ok {
                 Toast.shared.show(add ? "\(list.label)에 넣었어요" : "\(list.label)에서 뺐어요")
+                if case .watchLater = list, add {
+                    NotificationCenter.default.post(name: .watchLaterAdded, object: fid)
+                }
                 // 썸네일 별 표시 바로 반영
                 if case .favorite = list {
                     FavoritesStore.shared.mark(fid: fid, favorite: add)

@@ -223,24 +223,36 @@ struct DownloadSheet: View {
     }
 }
 
-/// 화면 아래에 잠깐 뜨는 알림
+/// 화면 아래에 잠깐 뜨는 알림 (여러 개면 계단식으로 쌓임, 최대 3개)
 @MainActor
 final class Toast: ObservableObject {
     static let shared = Toast()
-    @Published private(set) var message: String?
-    @Published private(set) var isError = false
-    private var hideTask: Task<Void, Never>?
 
-    func show(_ text: String, error: Bool = false, seconds: Double = 3) {
-        message = text
-        isError = error
-        hideTask?.cancel()
+    struct Item: Identifiable {
+        let id = UUID()
+        let text: String
+        let isError: Bool
+        /// 시간이 정해지지 않은 알림(찾는 중…)은 진행 표시를 붙이고, 다음 알림이 오면 자리를 넘겨줌
+        let busy: Bool
+        var action: (title: String, run: () -> Void)?
+    }
+
+    @Published private(set) var items: [Item] = []
+    var message: String? { items.last?.text }
+
+    func show(_ text: String, error: Bool = false, seconds: Double = 3, action: (title: String, run: () -> Void)? = nil) {
+        items.removeAll { $0.busy }
+        let item = Item(text: text, isError: error, busy: seconds <= 0, action: action)
+        items.append(item)
+        if items.count > 3 { items.removeFirst(items.count - 3) }
         guard seconds > 0 else { return }
-        hideTask = Task {
+        Task {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            if !Task.isCancelled { message = nil }
+            dismiss(item.id)
         }
     }
+
+    func dismiss(_ id: UUID) { items.removeAll { $0.id == id } }
 }
 
 struct ToastView: View {
@@ -248,24 +260,50 @@ struct ToastView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if let message = toast.message {
-            // 어느 화면 위에서도 잘 보이게 검정 배경에 흰 글씨 (아이콘만 색으로 성공·오류 구분)
-            Label {
-                Text(message).foregroundStyle(.white)
-            } icon: {
-                Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(toast.isError ? .orange : .green)
+        ZStack(alignment: .bottom) {
+            ForEach(Array(toast.items.enumerated()), id: \.element.id) { index, item in
+                // 새 알림이 앞, 앞서 온 알림은 위로 조금씩 밀려나며 작아짐
+                let depth = toast.items.count - 1 - index
+                row(item)
+                    .scaleEffect(1 - CGFloat(depth) * 0.05, anchor: .bottom)
+                    .offset(y: -CGFloat(depth) * 12)
+                    .opacity(1 - Double(depth) * 0.25)
+                    .zIndex(Double(index))
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.9)))
             }
-                .font(.callout.weight(.medium))
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 480)
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(.black.opacity(0.85), in: Capsule())
-                .shadow(radius: 6)
-                .padding(.bottom, 20)
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
         }
+        .padding(.bottom, 20)
+        .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.3), value: toast.items.map(\.id))
+    }
+
+    private func row(_ item: Toast.Item) -> some View {
+        // 어느 화면 위에서도 잘 보이게 검정 배경에 흰 글씨 (아이콘만 색으로 성공·오류 구분)
+        HStack(spacing: 8) {
+            if item.busy {
+                ProgressView().controlSize(.small).tint(.white)
+            } else {
+                Image(systemName: item.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(item.isError ? .orange : .green)
+                    .symbolEffect(.bounce, value: item.id)
+            }
+            Text(item.text).foregroundStyle(.white)
+            if let action = item.action {
+                Button(action.title) {
+                    action.run()
+                    toast.dismiss(item.id)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(EpoStyle.accent)
+                .fontWeight(.bold)
+            }
+        }
+        .font(.callout.weight(.medium))
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: 480)
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.black.opacity(0.85), in: Capsule())
+        .shadow(radius: 6)
     }
 }
 

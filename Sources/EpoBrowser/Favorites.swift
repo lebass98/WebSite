@@ -72,6 +72,9 @@ final class FavoritesStore: ObservableObject {
 /// 썸네일 위 즐겨찾기 별 (배경 원 없이 노란 별만, 밝은 장면용으로 아주 얇은 그림자)
 struct FavoriteStar: View {
     var size: CGFloat = 26
+    /// 값이 바뀌면 (즐겨찾기에 막 넣었을 때) 별이 두 번 튀고 불꽃이 퍼짐
+    var pop = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Image(systemName: "star.fill")
@@ -79,6 +82,50 @@ struct FavoriteStar: View {
             .foregroundStyle(.yellow)
             .frame(width: size, height: size)
             .shadow(color: .black.opacity(0.5), radius: 1)
+            .symbolEffect(.bounce, options: .repeat(2), value: pop)
+            .background { if !reduceMotion { Sparks(trigger: pop, size: size) } }
             .help("즐겨찾기한 영상")
     }
+}
+
+/// 가운데에서 바깥으로 퍼지며 사라지는 작은 불꽃 8개
+struct Sparks: View {
+    let trigger: Int
+    var size: CGFloat = 26
+    var color: Color = .yellow
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<8, id: \.self) { i in
+                Circle().fill(color).frame(width: 5, height: 5)
+                    .keyframeAnimator(initialValue: 0.0, trigger: trigger) { dot, t in
+                        let angle = Double(i) / 8 * 2 * .pi
+                        let distance = size * 0.45 + size * 0.5 * t
+                        dot.offset(x: cos(angle) * distance, y: sin(angle) * distance)
+                            .scaleEffect(1 - t * 0.8)
+                            .opacity(t > 0 && t < 1 ? 1 - t : 0)
+                    } keyframes: { _ in
+                        LinearKeyframe(0.0, duration: 0)
+                        CubicKeyframe(1.0, duration: 0.55)
+                    }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// 나중에 볼 영상에 넣었을 때 썸네일 모서리에 떨어지는 리본
+struct WatchLaterRibbon: View {
+    var body: some View {
+        Image(systemName: "bookmark.fill")
+            .font(.system(size: 22, weight: .bold))
+            .foregroundStyle(EpoStyle.accent)
+            .shadow(color: .black.opacity(0.4), radius: 1)
+            .help("나중에 볼 영상에 넣었어요")
+    }
+}
+
+extension Notification.Name {
+    /// 나중에 볼 영상에 넣음 (object: 사이트 영상 번호 Int)
+    static let watchLaterAdded = Notification.Name("watchLaterAdded")
 }

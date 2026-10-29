@@ -16,13 +16,14 @@ enum EpoStyle {
 struct LibraryEmptyState: View {
     let icon: String
     let title: String
+    /// 나타날 때 아이콘이 돌며 튀어나옴 (결과 없음 같은 상태 변화용)
+    var pop = false
     let message: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 32, weight: .light))
-                .foregroundStyle(EpoStyle.accent)
+            iconView
                 .frame(width: 72, height: 72)
                 .background(EpoStyle.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
             Text(title).font(.title3.weight(.semibold))
@@ -30,6 +31,21 @@ struct LibraryEmptyState: View {
                 .multilineTextAlignment(.center).frame(maxWidth: 360)
         }
         .padding(24)
+    }
+
+    @ViewBuilder private var iconView: some View {
+        let image = Image(systemName: icon)
+            .font(.system(size: 32, weight: .light))
+            .foregroundStyle(EpoStyle.accent)
+        if pop && !reduceMotion {
+            image.keyframeAnimator(initialValue: 0.0, repeating: false) { view, t in
+                view.scaleEffect(0.4 + 0.6 * t).rotationEffect(.degrees(-90 * (1 - t))).opacity(min(1, t * 1.5))
+            } keyframes: { _ in
+                SpringKeyframe(1.0, duration: 0.55, spring: .bouncy)
+            }
+        } else {
+            image
+        }
     }
 }
 
