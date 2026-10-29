@@ -17,6 +17,8 @@ final class BrowserModel: ObservableObject {
     /// 정렬 옆 카테고리 (기본 목록에서만)
     @Published var category: SiteCategory? { didSet { if category != oldValue { reload() } } }
     @Published var gay = Inclusion.exclude { didSet { if gay != oldValue { reload() } } }
+    /// 이 목록 안에서 찾기 (제목·키워드·올린 사람). 찾는 동안 뒤 페이지도 이어서 불러옴
+    @Published var localQuery = "" { didSet { if localQuery != oldValue { continueSearch() } } }
 
     @Published private(set) var videos: [Video] = []
     /// 영상별 화질 (세로 픽셀, 0 = 모름)
@@ -33,6 +35,7 @@ final class BrowserModel: ObservableObject {
 
     init(source: Source) {
         self.source = source
+        if savedListLabel != nil { order = .saved }
         // 사이드바에서 적용하거나 검색하면 처음부터 다시
         FilterStore.shared.$applied.dropFirst().removeDuplicates()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.reload() } }
@@ -50,6 +53,7 @@ final class BrowserModel: ObservableObject {
     var visibleVideos: [Video] {
         let f = filters
         let filtered = videos.filter { video in
+            if !ListSearch.matches(localQuery, video.title, video.keywords, video.uploaderName ?? "") { return false }
             let minutes = video.lengthSec / 60
             if minutes < f.minMinutes { return false }
             if f.maxMinutes < VideoFilters.openMax, video.lengthSec > f.maxMinutes * 60 + 59 { return false }
@@ -81,10 +85,20 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// 즐겨찾기·나중에 볼 영상이면 "넣은 순" 정렬 이름 (아니면 nil)
+    var savedListLabel: String? {
+        guard case .page(let p) = source, p.hasPrefix("/profile/") else { return nil }
+        if p.hasSuffix("/favourite-videos/") { return "즐겨찾기한 순" }
+        if p.hasSuffix("/watch-later/") { return "추가한 순" }
+        return nil
+    }
+
     /// 앱에서 정렬 (이번 주·이번 달 인기는 기간 정보가 없어서 조회수순으로)
     private func sortedLocally(_ list: [Video]) -> [Video] {
         switch order {
-        case .latest: list
+        case .saved: list
+        // 넣은 순서로 오는 목록은 영상 번호가 클수록 새로 올라온 영상
+        case .latest: savedListLabel == nil ? list : list.sorted { $0.fid > $1.fid }
         case .mostPopular, .topWeekly, .topMonthly: list.sorted { $0.views > $1.views }
         case .topRated: list.sorted { $0.rate > $1.rate }
         case .longest: list.sorted { $0.lengthSec > $1.lengthSec }
@@ -146,10 +160,22 @@ final class BrowserModel: ObservableObject {
     private var autoPages = 0
     private func fillIfNeeded() {
         if page == 1 { autoPages = 0 }
+        if isSearching { continueSearch(); return }
         guard visibleVideos.count < 24, hasMore, autoPages < 3 else { return }
         autoPages += 1
         isLoading = false
         loadNextPage()
+    }
+
+    /// 목록 안에서 찾는 중이면 끝(또는 최대 페이지)까지 이어서 불러옴
+    var isSearching: Bool { !localQuery.isEmpty && hasMore && page < ListSearch.maxPages }
+
+    private func continueSearch() {
+        // 지금 불러오는 작업이 끝난 뒤에 다음 페이지로
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isSearching, !self.isLoading else { return }
+            self.loadNextPage()
+        }
     }
 
     // MARK: 주소 만들기
@@ -311,8 +337,21 @@ final class CollectionModel: ObservableObject {
         }
     }
 
+    /// 이 목록 안에서 찾기 (이름). 찾는 동안 뒤 페이지도 이어서 불러옴
+    @Published var localQuery = "" { didSet { if localQuery != oldValue { continueSearch() } } }
+
+    var isSearching: Bool { !localQuery.isEmpty && hasMore && page < ListSearch.maxPages }
+
+    private func continueSearch() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isSearching, !self.isLoading else { return }
+            self.loadNextPage()
+        }
+    }
+
     /// 화면에 보일 순서
     var visibleItems: [CollectionItem] {
+        let items = items.filter { ListSearch.matches(localQuery, $0.title, $0.subtitle) }
         switch playlistSort {
         case .mostVideos:
             return items.sorted { Self.count($0) > Self.count($1) }
@@ -365,11 +404,25 @@ final class CollectionModel: ObservableObject {
                 page = next
                 // 채널 목록은 한 페이지뿐
                 hasMore = !fresh.isEmpty && kind.paged
+                continueSearch()
             } catch {
                 DebugLog.write("목록 실패: \(error)")
                 errorMessage = "목록을 불러오지 못했어요. VPN이 켜져 있는지 확인해 주세요."
             }
         }
+    }
+}
+
+/// 목록 안에서 찾기 (띄어쓴 낱말이 모두 들어 있으면 맞음, 대소문자 무시)
+enum ListSearch {
+    /// 찾는 동안 자동으로 불러올 최대 페이지
+    static let maxPages = 60
+
+    static func matches(_ query: String, _ fields: String...) -> Bool {
+        let words = query.split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty else { return true }
+        let text = fields.joined(separator: " ")
+        return words.allSatisfy { text.localizedStandardContains($0) }
     }
 }
 

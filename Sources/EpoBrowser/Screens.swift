@@ -141,7 +141,10 @@ struct CollectionView: View {
             HStack {
                 Text(model.kind.title).font(.title2.weight(.bold))
                 Spacer()
-                Text("\(model.visibleItems.count)개 표시").font(.caption).foregroundStyle(.secondary)
+                Text(!model.localQuery.isEmpty && (model.isSearching || model.isLoading)
+                     ? "찾는 중… \(model.visibleItems.count)개" : "\(model.visibleItems.count)개 표시")
+                    .font(.caption).foregroundStyle(.secondary)
+                ListSearchField(text: $model.localQuery, prompt: "이 목록에서 찾기")
             }
             .padding(20)
             if model.usesPornstarFilters {
@@ -188,6 +191,13 @@ struct CollectionView: View {
                 LibraryEmptyState(icon: "square.stack", title: "아직 표시할 항목이 없어요",
                                   message: "다른 검색어나 카테고리로 다시 찾아보세요.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.visibleItems.isEmpty, !model.localQuery.isEmpty, !model.isSearching, !model.isLoading {
+                VStack(spacing: 12) {
+                    LibraryEmptyState(icon: "magnifyingglass", title: "‘\(model.localQuery)’와 맞는 항목이 없어요",
+                                      message: "이 목록의 이름에서 찾았어요.")
+                    Button("찾기 지우기") { model.localQuery = "" }.buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 18) {

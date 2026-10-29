@@ -57,12 +57,15 @@ struct PlayerItem: Codable, Hashable {
 }
 
 enum SortOrder: String, CaseIterable, Identifiable {
+    /// 즐겨찾기·나중에 볼 영상에 넣은 순서 (사이트가 보여 주는 순서 그대로, 최근에 넣은 것 먼저)
+    case saved
     case latest, mostPopular = "most-viewed", topRated = "top-rated"
     case topWeekly = "top-weekly", topMonthly = "top-monthly", longest, shortest
     var id: String { rawValue }
 
     var label: String {
         switch self {
+        case .saved: "추가한 순"
         case .latest: "최신순"
         case .mostPopular: "인기순"
         case .topRated: "평점순"
@@ -74,9 +77,9 @@ enum SortOrder: String, CaseIterable, Identifiable {
     }
 
     /// 카테고리 페이지 주소용 (/cat/all/SORT-top-rated/)
-    var catSegment: String { self == .latest ? "" : "SORT-\(rawValue)" }
+    var catSegment: String { self == .latest || self == .saved ? "" : "SORT-\(rawValue)" }
     /// 검색(태그) 페이지 주소용 (/tag/taboo/top-rated/)
-    var tagSegment: String { self == .latest ? "" : rawValue }
+    var tagSegment: String { self == .latest || self == .saved ? "" : rawValue }
 }
 
 /// 게이 영상 (사이트 기본값은 제외)

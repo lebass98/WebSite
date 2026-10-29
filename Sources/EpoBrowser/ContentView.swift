@@ -17,10 +17,11 @@ struct VideoListView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.title2.weight(.bold)).lineLimit(1)
-                    Text(model.isLoading ? "라이브러리를 불러오는 중…" : "\(model.visibleVideos.count)개 표시 · 영상을 선택해 재생하세요")
+                    Text(status)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                ListSearchField(text: $model.localQuery, prompt: "이 목록에서 찾기")
             }
             .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
             FilterBar(model: model, onOpen: onOpen)
@@ -50,6 +51,15 @@ struct VideoListView: View {
         }
     }
 
+    private var status: String {
+        if !model.localQuery.isEmpty {
+            return model.isSearching || model.isLoading
+                ? "목록 전체에서 찾는 중… \(model.visibleVideos.count)개 찾음"
+                : "‘\(model.localQuery)’ \(model.visibleVideos.count)개 찾음"
+        }
+        return model.isLoading ? "라이브러리를 불러오는 중…" : "\(model.visibleVideos.count)개 표시 · 영상을 선택해 재생하세요"
+    }
+
     @ViewBuilder private var content: some View {
         if let error = model.errorMessage, model.videos.isEmpty {
             VStack(spacing: 12) {
@@ -60,6 +70,13 @@ struct VideoListView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.visibleVideos.isEmpty && (model.isLoading || model.videos.isEmpty && model.canLoadMore) {
             ProgressView("불러오는 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.visibleVideos.isEmpty, !model.localQuery.isEmpty {
+            VStack(spacing: 12) {
+                LibraryEmptyState(icon: "magnifyingglass", title: "‘\(model.localQuery)’와 맞는 영상이 없어요",
+                                  message: "이 목록의 제목·키워드·올린 사람에서 찾았어요.")
+                Button("찾기 지우기") { model.localQuery = "" }.buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.visibleVideos.isEmpty {
             VStack(spacing: 12) {
                 LibraryEmptyState(icon: "line.3.horizontal.decrease.circle", title: "조건에 맞는 영상이 없어요",
@@ -237,7 +254,9 @@ struct FilterBar: View {
         HStack(spacing: 14) {
             if model.isSortable {
                 Picker("정렬", selection: $model.order) {
-                    ForEach(SortOrder.allCases) { Text($0.label).tag($0) }
+                    ForEach(SortOrder.allCases.filter { $0 != .saved || model.savedListLabel != nil }) { sort in
+                        Text(sort == .saved ? model.savedListLabel ?? sort.label : sort.label).tag(sort)
+                    }
                 }
                 .fixedSize()
             }
@@ -409,6 +428,30 @@ struct VideoCard: View {
             .padding(.horizontal, 5).padding(.vertical, 2)
             .background(color, in: RoundedRectangle(cornerRadius: 4))
             .foregroundStyle(.white)
+    }
+}
+
+/// 목록 화면 위쪽의 "이 목록에서 찾기" 칸 (Esc로 지움)
+struct ListSearchField: View {
+    @Binding var text: String
+    let prompt: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .onExitCommand { text = "" }
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("찾기 지우기")
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .frame(width: 220)
+        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
