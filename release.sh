@@ -9,7 +9,7 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Info.pli
 BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" Info.plist)
 FILE="EpoBrowser-$VERSION.pkg"
 
-./make_pkg.sh
+bash ./make_pkg.sh
 
 echo "▶ dist/latest.json 쓰는 중"
 python3 - "$VERSION" "$BUILD" "$FILE" "$@" <<'EOF'
