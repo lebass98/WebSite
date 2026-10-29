@@ -102,6 +102,7 @@ struct PlayerHost: View {
 @MainActor
 final class PlayerChrome: NSObject, ObservableObject {
     private weak var window: NSWindow?
+    var playerWindow: NSWindow? { window }
     /// 영상을 끌어 재생 창을 옮길 때 쓰는, 마지막으로 누른 순간
     private var dragStart: NSEvent?
     /// 아래쪽 재생 조절 막대 높이 (여기서는 끌어도 창이 아니라 재생 위치가 움직임)
@@ -622,6 +623,7 @@ struct PlayerView: View {
         case .native(let player):
             NativePlayerView(player: player)
                 .overlay { SubtitleOverlay(engine: subtitles) }
+                .overlay(alignment: .bottom) { BufferBar(player: player) }
         case .embed:
             EmbedWebView(url: URL(string: item.embed)!, autoplay: true)
         }
@@ -760,6 +762,176 @@ final class SeekSetting: ObservableObject {
     static func label(_ s: Int) -> String { s == 60 ? "1분" : "\(s)초" }
 }
 
+/// 재생 중 마우스를 가만히 두면 재생 조절 막대와 마우스 화살표를 빨리 숨김
+/// (기본 플레이어는 숨기는 시간을 못 바꿔서, 막대 상자를 직접 투명하게 했다가 마우스를 움직이면 다시 보여 줌.
+///  controlsStyle을 바꾸면 막대 뒤 유리판이 화면에 남아서 쓰지 않음)
+@MainActor
+final class ControlsAutoHide: NSObject {
+    /// 마우스를 멈추고 숨기기까지 (초)
+    static let delay: Double = 1.5
+    private weak var view: AVPlayerView?
+    private var monitor: Any?
+    private var hideTask: Task<Void, Never>?
+
+    func attach(_ view: AVPlayerView) {
+        self.view = view
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .scrollWheel, .keyDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                if let self, let window = self.view?.window, event.window === window { self.reveal() }
+            }
+            return event
+        }
+        reveal()
+    }
+
+    /// 재생 조절 막대 상자 (AVKit 안쪽 뷰, 찾지 못하면 nil)
+    private var controls: NSView? {
+        guard let view else { return nil }
+        func find(_ v: NSView) -> NSView? {
+            if String(describing: type(of: v)).contains("AVMovableView") { return v }
+            for sub in v.subviews { if let found = find(sub) { return found } }
+            return nil
+        }
+        return find(view)
+    }
+
+    private func reveal() {
+        if let controls, controls.alphaValue < 1 {
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; controls.animator().alphaValue = 1 }
+        }
+        scheduleHide()
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.delay))
+            guard !Task.isCancelled else { return }
+            self?.hide()
+        }
+    }
+
+    private func hide() {
+        guard let view, let window = view.window, let player = view.player, let controls else { return }
+        // 멈춰 있거나 막대 위에 마우스가 있으면 계속 보여 주고 조금 뒤 다시 확인
+        let mouse = window.mouseLocationOutsideOfEventStream
+        let onControls = controls.convert(controls.bounds, to: nil).insetBy(dx: -20, dy: -20).contains(mouse)
+        if player.timeControlStatus != .playing || onControls {
+            scheduleHide()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.3; controls.animator().alphaValue = 0 }
+        if NSApp.isActive, view.convert(view.bounds, to: nil).contains(mouse) { NSCursor.setHiddenUntilMouseMoves(true) }
+    }
+
+    deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+    }
+}
+
+/// 받아 둔 범위·재생 위치 (영상 아래 얇은 막대용, 0.5초마다 확인)
+@MainActor
+final class BufferProgress: ObservableObject {
+    @Published private(set) var played: Double = 0      // 0~1
+    @Published private(set) var loaded: [ClosedRange<Double>] = []  // 0~1
+    @Published private(set) var ahead: Double = 0       // 지금 위치부터 받아 둔 초
+    /// 마우스를 움직이면 잠깐 보임 (재생 조절 막대와 같이)
+    @Published private(set) var visible = false
+    private var timer: Timer?
+    private var monitor: Any?
+    private var hideTask: Task<Void, Never>?
+
+    func start(_ player: AVPlayer) {
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self, weak player] _ in
+            MainActor.assumeIsolated { if let player { self?.update(player) } }
+        }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .keyDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                if let window = event.window, window === PlayerCenter.shared.chrome?.playerWindow { self?.show() }
+            }
+            return event
+        }
+        update(player)
+    }
+
+    func stop() {
+        timer?.invalidate(); timer = nil
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        hideTask?.cancel()
+    }
+
+    private func show() {
+        visible = true
+        hideTask?.cancel()
+        hideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(ControlsAutoHide.delay))
+            guard !Task.isCancelled else { return }
+            self?.visible = false
+        }
+    }
+
+    private func update(_ player: AVPlayer) {
+        guard let item = player.currentItem else { return }
+        let length = item.duration.seconds
+        let now = player.currentTime().seconds
+        guard length.isFinite, length > 0, now.isFinite else { return }
+        played = min(1, max(0, now / length))
+        var ranges: [ClosedRange<Double>] = []
+        var aheadSeconds: Double = 0
+        for value in item.loadedTimeRanges {
+            let r = value.timeRangeValue
+            let start = r.start.seconds, end = (r.start + r.duration).seconds
+            guard start.isFinite, end.isFinite, end > start else { continue }
+            ranges.append(max(0, start / length)...min(1, end / length))
+            if start <= now + 1, end > now { aheadSeconds = end - now }
+        }
+        loaded = ranges
+        ahead = aheadSeconds
+    }
+}
+
+/// 영상 맨 아래 얇은 막대: 밝은 회색 = 미리 받아 둔 부분, 강조색 = 본 부분
+struct BufferBar: View {
+    let player: AVPlayer
+    @StateObject private var progress = BufferProgress()
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text("미리 받음 \(Self.time(progress.ahead))")
+                .font(.caption2.monospacedDigit())
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.black.opacity(0.55), in: Capsule())
+                .foregroundStyle(.white)
+                .padding(.trailing, 8)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(.white.opacity(0.15))
+                    ForEach(Array(progress.loaded.enumerated()), id: \.offset) { _, r in
+                        Rectangle().fill(.white.opacity(0.5))
+                            .frame(width: geo.size.width * (r.upperBound - r.lowerBound))
+                            .offset(x: geo.size.width * r.lowerBound)
+                    }
+                    Rectangle().fill(EpoStyle.accent)
+                        .frame(width: geo.size.width * progress.played)
+                }
+            }
+            .frame(height: 4)
+        }
+        .opacity(progress.visible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.25), value: progress.visible)
+        .allowsHitTesting(false)
+        .onAppear { progress.start(player) }
+        .onDisappear { progress.stop() }
+    }
+
+    private static func time(_ s: Double) -> String {
+        let t = Int(s.rounded())
+        return t >= 60 ? "\(t / 60)분 \(t % 60)초" : "\(t)초"
+    }
+}
+
 /// 재생이 시작된 뒤 앞쪽을 몇 분 미리 받아 둘지 (1분 단위, 2~10분, 기본 2분)
 @MainActor
 final class BufferSetting: ObservableObject {
@@ -858,10 +1030,11 @@ final class FullScreenToggler: NSObject {
 struct NativePlayerView: NSViewRepresentable {
     let player: AVPlayer
 
-    func makeCoordinator() -> FullScreenToggler { FullScreenToggler() }
+    func makeCoordinator() -> ControlsAutoHide { ControlsAutoHide() }
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
+        context.coordinator.attach(view)
         view.player = player
         view.controlsStyle = .floating
         view.allowsPictureInPicturePlayback = true
